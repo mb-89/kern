@@ -1,0 +1,6 @@
+# se.lock: the commits scripts/se_modules.py resolved for the version ranges in se.toml.
+# Written by sync and update; commit it, never edit it.
+
+[modules.se]
+version = "5.110.0"
+ref = "ff7f06fc57ef98e371db4f1fff8c377b3fc5b3dd"

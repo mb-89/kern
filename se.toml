@@ -1,0 +1,78 @@
+[project]
+# release.toml owns kern's version and its tag v<version> (README.md "Release"), so this table names
+# no version: the landing assigns kern's version from the field report's `**Component kinds:**
+# kern <kind>`, through [binary] below.
+# The commit identity sync sets where the machine sets no public_identity (SE's README "Project
+# settings").
+identity = "mb <mb>"
+integration_branch = "main"
+# Every push to the integration branch runs SE's public check first (SE's README "Project settings").
+public_check = true
+
+# kern's binary, the bare core: its release.toml names its version and its tag, and a landing
+# assigns that version from the field report's Component kinds (SE's README "Component versions").
+[binary]
+release = "release.toml"
+
+# How a landing reaches main: "fast-forward" moves main to the tested landing commit, the
+# integrator's own, so no commit on main carries an address, and the commit gate stays strict
+# (SE's README "Landing on main").
+[integrate]
+landing = "fast-forward"
+
+# SE, at the commit se.lock locks: kern's check runs SE's tools (the commit gate, the issue rule,
+# the field report and the suite) at this pin, so an SE landing cannot fail kern's pull requests
+# (SE's README "Workflows"). `se_modules.py --root . sync se` writes se.lock.
+[modules.se]
+url = "../SE.git"
+version = "^5"
+
+# kern's Go tests (README.md "Tests"), with their own time and budget. A cold build of kern with
+# NATS compiles in about 19 to 23 s (SE's docs/go-core.md "Measurements"), its test binaries once
+# 35.1 s on CI: setup builds them first, outside the budget, which judges the tests.
+[tests]
+setup = ["go", "test", "-run", "^$", "./..."]
+command = ["go", "test", "./..."]
+target_seconds = 30
+limit_seconds = 60
+
+# The Python SDK's tests (python/tests, README.md "Tests"): the contract suite's Python fake leg and
+# the sample component's test, with pytest through uv from the root's pyproject.toml; no Go, no bus.
+[tests.beside.python]
+command = ["uv", "run", "pytest", "-q"]
+target_seconds = 30
+limit_seconds = 60
+
+# The bare application's tests (template/, README.md "The template"): its own Go module and its
+# own pyproject.toml, so kern's `go test ./...` leaves it out.
+[tests.beside.template]
+command = ["uv", "run", "pytest", "-q"]
+directory = "template"
+target_seconds = 60
+limit_seconds = 120
+
+# A relay step asked after a local phase longer than NATS's two minutes still reaches the hook
+# (contract/longstep_test.go, README.md "Tests"): the real core, a Python command and the test as
+# the session's host. Its real wait of 130 s keeps it out of kern's own tests, behind the build tag
+# longstep, whose fast guards are bus/expiry_test.go and host/refused_test.go; and off the landing
+# path: it runs nightly (suite --full) and where the change touches what it guards, the bus, NATS's
+# version, the step's remote side and runner, the relay's step and the test itself.
+[tests.beside.long-step]
+setup = ["go", "test", "-tags", "longstep", "-run", "^$", "./contract/"]
+command = ["go", "test", "-tags", "longstep", "-count=1", "-run", "^TestAStepAnswersAfterALongLocalPhase$", "./contract/"]
+paths = ["bus/", "go.mod", "go.sum", "host/declared.go",
+         "python/kern/runner.py", "python/kern/nats.py",
+         "components/github/relay.go", "contract/longstep_test.go",
+         "contract/fixture/gap/"]
+target_seconds = 150
+limit_seconds = 240
+
+# The released binary holds what the checkout builds (SE's docs/go-core.md "How the binary
+# arrives"): kern's release tool refuses where release.toml names a tag already cut and a file its
+# binary is built from changed since that tag; the remedy is a kind stated in the field report,
+# whose version the landing assigns (SE's README "Component versions"). It reads the tags git
+# fetched; a tag not fetched yet refuses nothing.
+[tests.beside.release-guard]
+command = ["go", "run", "./tools/release", "guard", "--dir", "."]
+target_seconds = 10
+limit_seconds = 30

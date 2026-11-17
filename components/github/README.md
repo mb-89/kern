@@ -2,7 +2,7 @@
 
 kern's GitHub component: the one I/O component that reaches GitHub. Every other component reads
 GitHub through its verbs, so no other component holds a token or a client. It names no
-application. Its design is SE's [docs/go-core.md](../../../docs/go-core.md), "GitHub in the
+application. Its design is SE's `docs/go-core.md`, "GitHub in the
 cloud".
 
 ## The backends
@@ -65,7 +65,7 @@ watches for, the input keys an answer must carry equal, and how long to wait, up
   its hook tells the one line `step <n> is answered: the current step is <m>` first, `m` the
   oldest numbered step waiting, then what waits.
 - A step whose call is given up leaves `outbox` at once, so the agent is never told a step that
-  no one waits for ([docs/go-core.md "A call given up"](../../../docs/go-core.md#a-call-given-up)).
+  no one waits for (`docs/go-core.md` "A call given up").
 - Only the relay runs steps; with a token a command runs its GitHub steps itself.
 
 ## Telling the agent, on the hook

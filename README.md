@@ -2,13 +2,7 @@
 
 kern is the Go core every application builds on: the index (names, the store, snapshots, the
 catalog), its NATS bus and its host. Its design is SE's
-[docs/go-core.md](../docs/go-core.md) until kern owns its contract.
-
-**Incubated in SE.** kern's own repository does not exist yet; the owner creates it, beside SE.
-Until then kern grows in SE under `kern/`, as its own Go module `kern`, a path that names no host,
-which builds find through the checkout (a `replace` of `kern`). How outside builds fetch kern once
-it moves is an open point of SE's [docs/go-core.md](../docs/go-core.md). Nothing in SE outside
-`kern/` and SE's Go components imports it.
+`docs/go-core.md` until kern owns its contract.
 
 ## Layout
 
@@ -32,7 +26,7 @@ named in the design's plan.
 | `contract/` | the contract suite: the built binary held to the bus's and the host's promises, and `cases.json` held against the Go fake, the Python fake and the real core with a Python component attached | |
 | `contract/fixture/` | tally, the suite's fixture and the sample Python component (`component.toml`, `__init__.py`), and the declarations of the two peers the real leg plays | |
 | `python/kern/` | the Python SDK, standard library only: the NATS peer, `component.toml`'s reader, the component and its decorators, the fake core, the runner `python -m kern run <folder>` | |
-| `python/tests/` | the Python fake's leg of the contract suite and the sample component's test, run by SE's Python suite | |
+| `python/tests/` | the Python fake's leg of the contract suite and the sample component's test, run by `se.toml` `[tests.beside.python]` | |
 | `release.toml` | kern's version and the one URL its release is published under ([Release](#release)) | |
 | `tools/release/` | builds the release: six archives and `SHA256SUMS` | |
 | `template/` | the bare application every new application starts from ([The template](#the-template)) | |
@@ -174,7 +168,7 @@ notice, so it is measured and can be held.
 ## A component in Python
 
 `python/kern/` is the SDK, standard library only (SE's
-[docs/go-core.md](../docs/go-core.md), "How a component in another language attaches"). A
+`docs/go-core.md`, "How a component in another language attaches"). A
 component is a folder: its `component.toml`, and an `__init__.py` that makes it with
 `kern.component("<name>")` and decorates its functions; `contract/fixture/tally/` is the sample.
 The wiring places it with `command = ["python", "-m", "kern", "run", "components/<name>"]`, the
@@ -185,10 +179,10 @@ SDK on `PYTHONPATH`.
 | `commit.<i>` | first `{"attach": {"contract": 1, "hash": "sha256:<hex>"}}`, then `{"writes": [...]}` | refuses another contract, another declaration, and a write before the attach |
 | `run.<i>` | hears that an input moved: reads `in.<i>`, commits each derivation's value | sends it after each commit that moves an input, and on the attach |
 | `in.<i>` | asks its inputs | answers them by local port, `config/<key>` among them, at the newest revision |
-| `cmd.<i>.<command>` | answers one step: `text`, `writes`, `requests`, `then`, or `error`; its lines go out on `say.<i>.<call>`. A message without a reply, `{"call", "stop"}`, is the stop word: it drops that call's continuation and sets its `kern.abandoned()` | sends the first step with the arguments and inputs, each later one with the answers; the stop word once it gives up a call whose step runs or whose continuation waits ([docs/go-core.md "A call given up"](../docs/go-core.md#a-call-given-up)) |
-| `io.<i>.<verb>` | an I/O component answers `{"answer": ...}` or `{"error": ...}` to `{"call", "request"}` | sends a request bound to the verb; and, without a reply, `{"call", "stop"}` once it stops waiting for that request ([A call given up](../docs/go-core.md#a-call-given-up)) |
+| `cmd.<i>.<command>` | answers one step: `text`, `writes`, `requests`, `then`, or `error`; its lines go out on `say.<i>.<call>`. A message without a reply, `{"call", "stop"}`, is the stop word: it drops that call's continuation and sets its `kern.abandoned()` | sends the first step with the arguments and inputs, each later one with the answers; the stop word once it gives up a call whose step runs or whose continuation waits (`docs/go-core.md` "A call given up") |
+| `io.<i>.<verb>` | an I/O component answers `{"answer": ...}` or `{"error": ...}` to `{"call", "request"}` | sends a request bound to the verb; and, without a reply, `{"call", "stop"}` once it stops waiting for that request (SE's `docs/go-core.md` "A call given up") |
 | `say.<i>.<call>` | says a step's line as it goes, `{"line"}`, and beats `{}` every 5 s while the step runs, on its own call's subject; where the bus refused the step's answer, says `{"refused"}` with the bus's reason | hands each line on to the call's caller; each word restarts the step's wait, `StepWait` (10 minutes, `KERN_STEP_WAIT` for a served core), so a step that beats runs as long as its process, its answer taken however late (`KERN_REPLY_WAIT` bounds it for a test); `{"refused"}` fails the step at once |
-| `call.<command>` | | a client's call: `{"args": [...], "progress"?}`, answered with the lines, the text or the error; with a progress subject in the caller's inbox, each line goes there as it is said and a beat every 5 s ([docs/go-core.md "Progress and long calls"](../docs/go-core.md#progress-and-long-calls)); `call.core.abandon`, `{"call": <its reply subject>}`, gives up a call in the asker's own inbox; a call whose reply subject no connection hears any more, its caller killed, is given up the same way |
+| `call.<command>` | | a client's call: `{"args": [...], "progress"?}`, answered with the lines, the text or the error; with a progress subject in the caller's inbox, each line goes there as it is said and a beat every 5 s (`docs/go-core.md` "Progress and long calls"); `call.core.abandon`, `{"call": <its reply subject>}`, gives up a call in the asker's own inbox; a call whose reply subject no connection hears any more, its caller killed, is given up the same way |
 
 - **The declaration hash** is the SHA-256 of `component.toml`'s bytes, line ends read as LF,
   written `sha256:<hex>`: the bytes, not what they parse to, so Go and Python answer one hash.
@@ -206,29 +200,35 @@ SDK on `PYTHONPATH`.
 ## Tests
 
 ```sh
-cd kern && go vet ./... && go test ./...
+go vet ./... && go test ./...
 ```
 
-SE declares kern's tests beside its Python suite, `se.toml` `[tests.beside.kern]`, with their own
-time and budget (SE's [README "Test budget"](../README.md#test-budget)): `integrate`,
-`work_tickets.py suite` and the `check` job, the check `main`'s ruleset requires, run them after the
-suite, so a red kern test refuses the integration and the Python suite's budget is untouched.
-`check` vets kern in its own step, and fails where `gofmt -l` lists a file of kern's. The job
+kern's `se.toml` declares its tests, with their time and budget (SE's README "Test budget"):
+`[tests]` is kern's Go tests, and beside them `[tests.beside.python]` the Python SDK's tests
+(`python/tests`, pytest through uv from the root's `pyproject.toml`), `[tests.beside.template]`
+the template's, `[tests.beside.long-step]` and `[tests.beside.release-guard]` (below).
+`work_tickets.py suite --worktree .`, SE's suite command at kern's SE pin, runs them all, and
+`integrate` runs the same, so a red test refuses the integration.
+
+`.github/workflows/check.yml` is the check `main`'s ruleset requires, `check`. Its job `check`
+gates the commits with SE's public check, holds a pull request to the work model's issue rule and
+its field report, fails where `gofmt -l` lists a file, vets kern and runs the suite (`--full`
+nightly), all with SE's tools at the commit `se.lock` locks for `[modules.se]`. The job
 `kern-platforms` runs kern's vet and tests on Windows, where the detached start and the stop
-differ, and there also the tests of SE's start and hook scripts (`tests/test_bootstrap.py`,
-`tests/test_se_hook.py`), whose paths differ too, a zip among them. `check` needs it and fails
-unless every leg passed. kern is built for darwin, and not tested there: no leg runs on macOS.
+differ; `check` needs it and fails unless every leg passed. `kern-platforms-queue` reports a leg
+that never got a runner, and `check-rerun.yml` re-runs such a first attempt once (SE's README
+"Platform legs and their queue"). kern is built for darwin, and not tested there: no leg runs on
+macOS.
 
 The contract suite runs `contract/cases.json` three times: against the Go fake
 (`contract/fake_test.go`), against the real core with tally's Python process placed and attached
 (`contract/real_test.go`, Python 3.11 or later, from `KERN_PYTHON` or the path), and against the
-Python fake (`python/tests/`, in SE's Python suite through `pyproject.toml`'s `testpaths`, so its
-time counts against SE's budget and needs no Go).
+Python fake (`python/tests/`, `se.toml` `[tests.beside.python]`, which needs no Go).
 
 One case waits for real: `contract/longstep_test.go`, behind the build tag `longstep`, asks a relay
 step after a local phase of 130 s, longer than NATS's two minutes, the one limit on the path that
-no fake clock reaches. `go test ./...` leaves it out; SE runs it beside the suite as `se.toml`
-`[tests.beside.kern-long-step]` (`go test -tags longstep -run TestAStepAnswersAfterALongLocalPhase
+no fake clock reaches. `go test ./...` leaves it out; the suite runs it beside as `se.toml`
+`[tests.beside.long-step]` (`go test -tags longstep -run TestAStepAnswersAfterALongLocalPhase
 ./contract/`), nightly and where a change touches the `paths` it guards.
 
 Its fast guards run in `go test ./...`, in milliseconds: `bus/expiry_test.go` holds that an
@@ -241,8 +241,10 @@ instance's reply permission never expires where the core sets no reply wait, and
 checkout's origin names ([home](home/home.go)), so it names no host, owner or repository:
 
 ```toml
-version = "0.5.0"
-download = "releases/download/kern-v{version}"
+version = "0.14.0"
+download = "releases/download/v{version}"
+binary = "kern"
+package = "./cmd/kern"
 ```
 
 - **The assets:** `<binary>-<version>-<os>-<arch>.tar.gz` for `linux` and `darwin`, `.zip` for
@@ -255,18 +257,21 @@ download = "releases/download/kern-v{version}"
   refuses where the tag the folder's `release.toml` names is cut already and a file its binary is
   built from (each imported package's files but tests and prose, embedded files, the modules'
   `go.mod` and `go.sum`) differs since that tag; it names the files and the `release.toml` to
-  raise. A tag not cut yet passes: the push to `main` that carries the version cuts it. SE runs it
-  for kern and `se` beside its suite, `se.toml` `[tests.beside.release-guard]`. On a work branch
-  `$SE_COMPONENT_KINDS` (`se=patch,kern=minor`) names the kinds its field report states, and a
+  raise. A tag not cut yet passes: the push to `main` that carries the version cuts it. kern's
+  suite runs it for the bare core beside its tests, `se.toml` `[tests.beside.release-guard]`. On
+  a work branch `$SE_COMPONENT_KINDS` (`se=patch,kern=minor`) names the kinds its field report states, and a
   changed binary of a stated kind passes: SE's landing assigns its version (SE's README
-  ["Component versions"](../README.md#component-versions)).
-- **The workflow is reusable:** `.github/workflows/kern-release.yml` builds the six for the folder
-  it is called with (the bare core by default), on every pull request and push to `main` that
-  touches kern, and runs [the template](#the-template)'s battery for the bare core. On `main` it
-  publishes the release that folder's `release.toml` names, where it does not exist yet, so the push
-  that changes `version` cuts it; a release that exists is never changed. A rerun is
-  `workflow_dispatch`. An application calls it for its own binary (SE's `se-release.yml` does, for
-  `se`):
+  "Component versions").
+- **The workflow:** `.github/workflows/release.yml` builds the six for the bare core on every pull
+  request and push to `main`, checks them with `sha256sum -c`, and runs [the template](#the-template)'s
+  tests. On `main` it publishes the release `v<version>` under kern's own releases, where it does
+  not exist yet, so the push that changes `version` cuts it; a release that exists is never
+  changed. A rerun is `workflow_dispatch`. The release tool reads the tag from `download` and the
+  repository from the checkout's origin, and refuses to publish into another repository than the
+  one it runs in (`plan --repository`).
+- **An application's release:** an application builds its own binary through the reusable
+  `kern-release.yml`, the copy SE writes into it (SE's `scripts/se_workflows.py`, which keeps only
+  `workflow_call`), called with its binary's folder:
 
 ```yaml
   jobs:
@@ -275,8 +280,7 @@ download = "releases/download/kern-v{version}"
       with:
         directory: <the application's binary folder>
 ```
-  An application's copy is the one SE writes into it (SE's `scripts/se_workflows.py`), which
-  keeps only `workflow_call`.
+
 - **Fetching it:** `<download>/kern-<version>-<os>-<arch>.tar.gz` and `<download>/SHA256SUMS`, the
   download under the home origin names, the archive checked against its line, then unpacked.
   Where origin names no home, nothing is fetched: the start builds the binary from its folder.
@@ -287,16 +291,11 @@ download = "releases/download/kern-v{version}"
 | nats-server v2.11.9 linux-amd64, 6.35 MB, from its GitHub release through the container's proxy: the same steps | 0.68 to 1.27 s |
 | building the six, `go run ./tools/release build`, warm module cache | 17.5 to 18.7 s each, 110 s in all |
 
-**The move to kern's own repository changes one line:** `release.toml`'s `download`, to
-`releases/download/v{version}`, under kern's own origin then. The release tool reads the tag from
-that path and the repository from the checkout's origin, and refuses to publish into another
-repository than the one it runs in (`plan --repository`), so it moves with kern's other workflows (the design's move, step 2), as `release.yml`, and
-`battery.yml` below moves beside it.
-
 ## The battery
 
-SE's `.github/workflows/kern-battery.yml` is the reusable CI every kern application calls, through
-the copy SE writes into it (SE's `scripts/se_workflows.py`):
+`kern-battery.yml` is the reusable CI every kern application calls. SE ships it to each
+application, as the battery runs SE's `integrator-pass` action: the application calls the copy SE
+writes into it (SE's `scripts/se_workflows.py`):
 
 ```yaml
 jobs:
@@ -307,12 +306,12 @@ jobs:
 It sets up the Go of the application's `go.mod` and uv, vets the Go code, and runs the
 application's `se.toml` `[tests]` command, its Go tests and its Python tests, held to that table's
 one budget: over `target_seconds` it warns, over `limit_seconds` or on a failed test it fails, as
-SE's own suite (SE's [README "Test budget"](../README.md#test-budget)). Its input `directory`
-names the application's folder, `.` by default.
+SE's own suite (SE's README "Test budget"). Its input `directory` names the application's
+folder, `.` by default.
 
 Where the application's `se.toml` sets `trust_integrator`, the battery's job `trust` passes it on
 the integrator's record of exactly its tree, and the vet and tests do not run; the template
-keeps it off ([SE's README "Trusted landings"](../README.md#trusted-landings)).
+keeps it off (SE's README "Trusted landings").
 
 ## The template
 
@@ -320,7 +319,7 @@ keeps it off ([SE's README "Trusted landings"](../README.md#trusted-landings)).
 components, an empty `wiring.toml`, `components/`, `types/`, `se.toml` with its `[tests]` budget
 and `[modules.kern]`, an `AGENTS.md`, a battery that starts the bare core, and a `check.yml` that
 calls the battery. It is a Go module of its own, so kern's `go test ./...` leaves it out; the
-release workflow runs its battery on every change to kern.
+release workflow runs its tests on every change to kern.
 
 ## The catalog check's budget
 

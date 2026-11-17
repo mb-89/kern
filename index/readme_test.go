@@ -2,6 +2,7 @@ package index_test
 
 import (
 	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
@@ -14,7 +15,7 @@ import (
 // step: exactly the fields of index.Answer a process sends, so the row never
 // names a field the core no longer reads (a step's lines ride say.<i>.<call>).
 func TestTheReadmesStepRowNamesTheFieldsOfAnAnswer(t *testing.T) {
-	data, err := os.ReadFile("../README.md")
+	data, err := os.ReadFile(filepath.Join("..", "README.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,0 +1,199 @@
+# kern's CI, the one check main's ruleset requires by its name `check` (README.md "Tests"): on every
+# pull request, every push to main and nightly. The job check runs SE's tools at the commit se.lock
+# locks for [modules.se] (SE's README "Workflows"): the public check's commit gate, on a pull request
+# the work model's issue rule and its field report; then gofmt, go vet and the complete suite,
+# se.toml [tests] and the suites beside it, within their budgets. The job kern-platforms runs
+# kern's vet and tests on Windows, where the detached start, the standing file and the stop differ;
+# check needs it and fails unless every leg passed, so the one required check covers it.
+name: check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+  push:
+    branches: [main]
+  # main's full suite every night, also the suites beside whose paths no change touched.
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  check:
+    needs: kern-platforms
+    # It runs whatever kern-platforms answered, and its last step fails unless that passed: a
+    # required check that is skipped would count as passed.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: The SE commit se.lock locks
+        id: se
+        run: echo "ref=$(python3 -c 'import tomllib; print(tomllib.load(open("se.lock", "rb"))["modules"]["se"]["ref"])')" >> "$GITHUB_OUTPUT"
+      # SE beside kern, as the module se.toml [modules.se] names it; .se/ is ignored.
+      - name: SE at kern's pin
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/SE
+          ref: ${{ steps.se.outputs.ref }}
+          path: .se/ci/se
+      - name: Gate the commits
+        # A scheduled run gates nothing new: its commits were gated when they were pushed. No cloud
+        # list is set: the gate runs the public list SE commits, by design.
+        if: github.event_name != 'schedule'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.pull_request.head.sha || github.sha }}
+          BRANCH: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          DEFAULT: ${{ github.event.repository.default_branch }}
+        run: |
+          # A pull request: its commits, those its head holds and its base branch does not. A push:
+          # the commits public_check.py's push_range takes, those after the branch's old tip (where
+          # it is unknown, those no other branch holds).
+          refused="::error::public-check (SE's scripts/public_check.py, SE's AGENTS.md 'Public safety') refused the commits it names: amend each named commit as its line says, then push again"
+          if [ -n "$BASE_REF" ]; then
+            range="refs/remotes/origin/$BASE_REF..$AFTER"
+            echo "public-check: gating $range, the commits of the pull request into $BRANCH"
+            if ! python3 .se/ci/se/scripts/public_check.py --repo . --rev "$AFTER" --range "$range"; then
+              echo "$refused"; exit 1
+            fi
+          elif ! python3 .se/ci/se/scripts/public_check.py --repo . --rev "$AFTER" --push "$BEFORE" --branch "$BRANCH" --default-branch "$DEFAULT"; then
+            echo "$refused"; exit 1
+          fi
+      # The work model's issue rule (SE's work model "Integration branch"): the description names an
+      # open work issue, a landing's through the work pull request it lands.
+      - name: The pull request names an open work issue
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 .se/ci/se/scripts/pr_issues.py --repo .
+      - uses: astral-sh/setup-uv@v7
+      - name: The pull request's field report follows the template
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          # A worker's pull request carries its field report; it is checked against its work issue,
+          # the issue its first line `Fixes|Refs <issue url>` names. A pull request without the
+          # report's marker has none to check. A landing pull request carries
+          # `<!-- se:field-report-in <n> -->` instead: the report is the description of the work
+          # pull request <n>, read from there (SE's README "Landing on main").
+          se=.se/ci/se/scripts
+          body="$RUNNER_TEMP/pr-body.md"
+          printf '%s\n' "$PR_BODY" > "$body"
+          work=$(sed -nE 's#^<!-- se:field-report-in ([0-9]+) -->[[:space:]]*$#\1#p' "$body" | head -n 1)
+          if [ -n "$work" ]; then
+            echo "field-report: the landing's report is the description of pull request $work"
+            gh api "repos/$REPOSITORY/pulls/$work" --jq .body > "$body"
+          fi
+          if ! grep -q '<!-- se:field-report -->' "$body"; then
+            echo "field-report: no field report in the description, nothing to check"
+            exit 0
+          fi
+          # pr_issues.py owns how a description names its issue, for this step and the one above.
+          if ! issue=$(python3 "$se/pr_issues.py" --work-issue "$body" --repository "$REPOSITORY"); then
+            echo "::error::field-report: the description's first line names no work issue of $REPOSITORY (Fixes|Refs <issue url>, as work_tickets.py pr-body writes it, or Refs #<n>)"
+            exit 1
+          fi
+          gh api "repos/$REPOSITORY/issues/$issue" --jq .body > "$RUNNER_TEMP/issue-body.md"
+          # A work pull request's Component kinds reach the suite's release guard, which passes a
+          # changed component of a stated kind, as the landing assigns its version (SE's README
+          # "Component versions"); a landing's release commit carries the versions, so it sets none.
+          kinds=()
+          if [ -z "$work" ]; then kinds=(--component-kinds-to "$GITHUB_ENV"); fi
+          uv run --no-project --python ">=3.11" python "$se/work_tickets.py" field-report --check "$body" --issue-body "$RUNNER_TEMP/issue-body.md" "${kinds[@]}"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      # gofmt -l lists each Go file not formatted as gofmt writes it; any fails the check.
+      - name: kern is formatted
+        run: |
+          unformatted=$(gofmt -l $(git ls-files '*.go'))
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt -l lists files of kern not formatted: $(echo $unformatted); run gofmt -w on them"
+            exit 1
+          fi
+      - name: kern vets
+        run: time go vet ./...
+      # The budget's reference run (SE's README "Test budget"): over a limit here, check fails. The
+      # nightly run is full: it runs every suite beside, also one whose paths the change does not
+      # touch, such as long-step.
+      - name: The complete suite, within its budgets
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          full=()
+          if [ "$EVENT" = schedule ]; then full=(--full); fi
+          uv run --no-project --python ">=3.11" python .se/ci/se/scripts/work_tickets.py suite --worktree . "${full[@]}"
+      - name: kern passed on Windows
+        env:
+          PLATFORMS: ${{ needs.kern-platforms.result }}
+        run: |
+          if [ "$PLATFORMS" != success ]; then
+            echo "::error::kern-platforms answered $PLATFORMS: kern's tests on Windows (the job kern-platforms of this run) must pass"
+            exit 1
+          fi
+  # kern's tests on Windows, its contract suite among them (README.md "Tests"): the detached start,
+  # the standing file and the stop differ there. No leg runs on macOS: the release cross-compiles
+  # darwin on Linux, and nothing tests it there. Its name is the one SE's platform-code rule reads
+  # (SE's scripts/work_tickets.py PLATFORM_JOB).
+  kern-platforms:
+    # A leg that runs is bounded here; the time it waits for a runner counts against nothing here,
+    # so kern-platforms-queue bounds that (SE's README "Platform legs and their queue").
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      # The contract suite's real leg runs its fixture component in Python 3.11 or later
+      # (contract/real_test.go).
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: kern vets
+        run: go vet ./...
+      - name: kern's tests pass, its contract suite among them
+        run: go test ./...
+      # The hook test that once bounded runner speed (host/host_test.go), repeated where it
+      # flaked; a second or less.
+      - name: A hook with no core fails open at once, 200 runs of 200
+        run: go test -count=200 -run 'TestAHookWithNoCoreFailsOpenAtOnce$' ./host/
+  # The queue bound of kern-platforms (SE's README "Platform legs and their queue"): a leg still
+  # waiting for a runner after 20 minutes is reported as never run, not as a test failure, and the
+  # run is cancelled; check-rerun.yml re-runs a first attempt so cancelled once.
+  kern-platforms-queue:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: The SE commit se.lock locks
+        id: se
+        run: echo "ref=$(python3 -c 'import tomllib; print(tomllib.load(open("se.lock", "rb"))["modules"]["se"]["ref"])')" >> "$GITHUB_OUTPUT"
+      - name: SE at kern's pin
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/SE
+          ref: ${{ steps.se.outputs.ref }}
+          path: .se/ci/se
+      - name: Every kern-platforms leg gets a runner within 20 minutes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 .se/ci/se/scripts/ci_queue.py watch --jobs kern-platforms --queue-minutes 20

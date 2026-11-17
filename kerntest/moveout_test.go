@@ -59,6 +59,10 @@ var moveOutSkipped = map[string]bool{
 	"kerntest/" + listFile:     true,
 }
 
+// moveOutSkippedDirs are the folders the scan never enters: git's, Python's
+// caches, and the .se and .venv folders a local or CI checkout of kern holds.
+var moveOutSkippedDirs = map[string]bool{".git": true, "__pycache__": true, ".se": true, ".venv": true}
+
 // dataLines answers a data file's lines without blank and # comment lines,
 // a Windows checkout's \r trimmed.
 func dataLines(text string) []string {
@@ -106,8 +110,8 @@ func parseMoveOutList(text string) (map[moveOutEntry]bool, error) {
 // distinct kind, file and match once, sorted, the match without its release
 // version (withoutVersion). On a line, a span the first
 // matching pattern claims is never listed again under a later one. Folders
-// .git and __pycache__, files with a NUL byte and the skipped files are not
-// read.
+// .git, __pycache__, .se and .venv (which a local or CI checkout holds),
+// files with a NUL byte and the skipped files are not read.
 func scanMoveOut(fsys fs.FS, patterns []moveOutPattern, skipped map[string]bool) ([]moveOutEntry, error) {
 	found := map[moveOutEntry]bool{}
 	err := fs.WalkDir(fsys, ".", func(name string, d fs.DirEntry, err error) error {
@@ -115,7 +119,7 @@ func scanMoveOut(fsys fs.FS, patterns []moveOutPattern, skipped map[string]bool)
 			return err
 		}
 		if d.IsDir() {
-			if d.Name() == ".git" || d.Name() == "__pycache__" {
+			if moveOutSkippedDirs[d.Name()] {
 				return fs.SkipDir
 			}
 			return nil
@@ -274,7 +278,7 @@ func TestMoveOutListsWhatNamesSEOrAHost(t *testing.T) {
 
 // A reference planted in a fixture tree is reported as new, a listed one no
 // longer there as gone, a span is listed under its first kind only, and the
-// skipped, binary and __pycache__ files are not read.
+// skipped, binary, __pycache__, .se and .venv files are not read.
 func TestMoveOutReportsAPlantedReference(t *testing.T) {
 	patterns := readMoveOutPatterns(t)
 	tree := fstest.MapFS{
@@ -283,6 +287,8 @@ func TestMoveOutReportsAPlantedReference(t *testing.T) {
 		"b/b.go":               {Data: []byte("package b\n")},
 		"b/__pycache__/b.pyc":  {Data: []byte("SE_GIT_DOOR")},
 		"b/bin":                {Data: []byte("SE_GIT_DOOR\x00")},
+		".se/work/note.md":     {Data: []byte("SE_GIT_DOOR")},
+		".venv/lib/x.py":       {Data: []byte("SE_GIT_DOOR")},
 		"kerntest/" + listFile: {Data: []byte("SE_GIT_DOOR")},
 	}
 	listed, err := parseMoveOutList("# a comment\nse-doc-link\ta/a.go\t../docs/go-core.md#x\nse-variable\tb/b.go\tSE_OLD\n")

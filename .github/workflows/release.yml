@@ -1,0 +1,99 @@
+# kern's release (README.md "Release"): it builds the bare core for six platforms with SHA256SUMS,
+# the same bytes for one commit, through the release tool (tools/release), which reads release.toml,
+# and runs the template's tests. On a pull request it only builds and tests; on a push to main it
+# publishes the release v<version> that release.toml names, where it does not exist yet, so a push
+# that changes the version cuts it, and it never changes a release that exists. An application
+# builds its own binary through the reusable kern-release.yml, the copy SE writes into it.
+name: release
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # A rerun of the publication, for example after a refused tag was allowed.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  build:
+    runs-on: ubuntu-26.04
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
+      binary: ${{ steps.plan.outputs.binary }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      # The release tool refuses where release.toml's URL names another repository than this one.
+      - name: The release release.toml names
+        id: plan
+        run: go run ./tools/release plan --dir . --repository "$GITHUB_REPOSITORY" | tee -a "$GITHUB_OUTPUT"
+      - name: Six binaries and SHA256SUMS
+        run: |
+          go run ./tools/release build --dir . --out "$RUNNER_TEMP/dist"
+          ls -l "$RUNNER_TEMP/dist"
+          cat "$RUNNER_TEMP/dist/SHA256SUMS"
+          (cd "$RUNNER_TEMP/dist" && sha256sum -c SHA256SUMS)
+      - uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.plan.outputs.binary }}-${{ steps.plan.outputs.version }}
+          path: ${{ runner.temp }}/dist/
+          if-no-files-found: error
+
+  # The bare application builds and its tests pass (README.md "The template"): its own Go module,
+  # on the Go its go.mod pins, and its pytest suite through uv, which builds and starts its core.
+  template:
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        working-directory: template
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: template/go.mod
+          cache-dependency-path: template/go.sum
+      - uses: astral-sh/setup-uv@v7
+      - name: The template's Go code vets
+        run: go vet ./...
+      - name: The template's tests
+        run: uv run pytest -q
+
+  publish:
+    needs: [build, template]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.template.result == 'success' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: ${{ needs.build.outputs.binary }}-${{ needs.build.outputs.version }}
+          path: dist
+      - name: Publish the release where it is missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+          BINARY: ${{ needs.build.outputs.binary }}
+        run: |
+          # A release that exists is never changed: a change without a new version releases nothing.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "release: $TAG is released already; change release.toml's version to cut the next"
+            exit 0
+          fi
+          notes="$BINARY $VERSION, for linux, darwin and windows on amd64 and arm64. Verify with sha256sum -c SHA256SUMS (README.md \"Release\")."
+          if ! gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "$BINARY $VERSION" --notes "$notes" dist/*; then
+            echo "::error::release: GitHub refused release $TAG on $GITHUB_SHA; where a tag ruleset refuses this tag scheme, allow this workflow to create it (Settings > Rules > Rulesets), then run this workflow on main again"
+            exit 1
+          fi
+          echo "release: published $TAG on $GITHUB_SHA"

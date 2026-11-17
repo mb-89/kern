@@ -1,0 +1,16 @@
+[project]
+name = "kern"
+version = "0.0.0"
+description = "kern's Python SDK tests; release.toml owns kern's version."
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+# The Python SDK's tests (README.md "Tests"): against the Python fake, no Go, no bus.
+testpaths = ["python/tests"]
+
+[dependency-groups]
+dev = ["pytest>=9.2.0"]

@@ -35,14 +35,14 @@ func TestReleaseTomlNamesAPathUnderTheHomeOriginNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Tag != "kern-v"+r.Version || r.Path != "releases/download/kern-v"+r.Version || r.Repository != "" || r.Download != "" {
-		t.Fatalf("while incubated, kern releases as kern-v<version> under the checkout's home: got %+v", r)
+	if r.Tag != "v"+r.Version || r.Path != "releases/download/v"+r.Version || r.Repository != "" || r.Download != "" {
+		t.Fatalf("kern releases as v<version> under the checkout's home: got %+v", r)
 	}
 	if r.Binary != DefaultBinary || r.Package != DefaultPackage {
-		t.Fatalf("kern's release.toml names no binary, so it is the bare core's: got %q %q", r.Binary, r.Package)
+		t.Fatalf("kern's release.toml names the bare core's binary and package: got %q %q", r.Binary, r.Package)
 	}
 	at := r.Resolve(home.Home{Host: "github.com", Owner: "alice", Repository: "project"})
-	if at.Repository != "alice/project" || at.Download != "https://github.com/alice/project/releases/download/kern-v"+r.Version {
+	if at.Repository != "alice/project" || at.Download != "https://github.com/alice/project/releases/download/v"+r.Version {
 		t.Fatalf("resolved under the home: got %+v", at)
 	}
 	moved, err := Read([]byte("version = \"1.2.3\"\ndownload = \"https://github.com/alice/kern/releases/download/v{version}\"\n"))
