@@ -121,6 +121,7 @@ se-file	host/usage.go	scripts/se_usage.py
 se-file	index/wiring.go	.se/wiring
 se-file	index/wiring_test.go	.se/components
 se-file	index/wiring_test.go	.se/wiring
+se-file	kerntest/record_test.go	.se/expect
 se-file	se.lock	scripts/se_modules.py
 se-file	se.lock	se.toml
 se-file	template/.github/workflows/check.yml	se.toml
