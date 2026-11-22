@@ -280,6 +280,52 @@ and the battery all asked, so there was no second road.
 - **Beside it**, standard servers stay for what they do well: prose (`vale-ls`) and code
   formatting (Biome). The editor runs them next to `<name> lsp`.
 
+### In VS Code
+
+VS Code starts a language server through an extension of its own, which names the command and the
+documents it serves. The editor runs `<name> lsp` in the folder it opened, the checkout, so the
+server finds the checkout as every verb does; `--root DIR` names another. A minimal extension is two
+files in a folder of their own, with `vscode-languageclient` installed beside them (`npm install
+vscode-languageclient`):
+
+`package.json`:
+
+```json
+{
+  "name": "kern-lsp",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.82.0" },
+  "main": "extension.js",
+  "activationEvents": ["workspaceContains:wiring.toml"],
+  "dependencies": { "vscode-languageclient": "^9.0.1" }
+}
+```
+
+`extension.js`:
+
+```js
+const { LanguageClient } = require("vscode-languageclient/node");
+
+let client;
+
+exports.activate = () => {
+  // kern's own binary is `kern`; an application names its own, such as `se`.
+  client = new LanguageClient("kern", "kern",
+    { command: "kern", args: ["lsp"] },
+    { documentSelector: [{ scheme: "file", language: "markdown" }, { scheme: "file", language: "json" }] });
+  return client.start();
+};
+
+exports.deactivate = () => client && client.stop();
+```
+
+Install it with `code --install-extension` on the folder packed by `npx @vscode/vsce package`, or
+open the folder in VS Code and run it with F5 (an Extension Development Host). The findings show in
+the editor and in the Problems panel, every managed file's, the closed ones too; the open Markdown
+and JSON buffers are checked as typed. The server's own log is the extension's output channel,
+`kern`. Another editor starts it the same way, with the command `<name> lsp` over stdio, such as
+Neovim's `vim.lsp.start({ name = "kern", cmd = { "kern", "lsp" }, root_dir = vim.fs.root(0, ".git") })`.
+
 ## Tests
 
 ```sh
