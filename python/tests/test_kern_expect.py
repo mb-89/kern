@@ -4,6 +4,7 @@ holds both to the same refusals and matches (README.md "Expectations")."""
 from __future__ import annotations
 
 import json
+import re
 import sys
 import tomllib
 from pathlib import Path
@@ -130,3 +131,123 @@ verb = "append"
                  'claim 1: component reader writes no output "total"',
                  'claim 2: component reader accepts no verb "append"'):
         assert want in str(e.value)
+
+
+READER = b'''
+name = "reader"
+contract = 1
+help = "Sums numbers and posts lines."
+
+[inputs]
+numbers = "[int]"
+
+[outputs.sum]
+type = "int"
+builtin = 0
+derived = true
+help = "The sum."
+
+[commands.file]
+usage = "file WORDS..."
+summary = "File words."
+group = "Tests"
+help = "Posts each word."
+class = "batch"
+
+[requests.post]
+type = "string"
+answer = "int"
+help = "Posts a line."
+'''
+
+READER_EXPECTS = '''
+[[expect]]
+name = "numbers"
+port = "numbers"
+value = []
+match = "exact"
+
+[[expect]]
+name = "numbers"
+port = "numbers"
+given = "numbers stand"
+value = [1, 2, 3]
+
+[[expect]]
+name = "lines.append"
+request = "post"
+ask = ""
+exact = ["ask"]
+refused = true
+
+[[expect]]
+name = "lines.append"
+request = "post"
+ask = "a word"
+answer = 1
+
+[[expect]]
+name = "lines.append"
+request = "post"
+given = "two lines stand"
+ask = "a word"
+answer = 3
+'''
+
+
+def reader():
+    from kern.component import Component
+
+    c = Component(parse_declaration(READER))
+
+    @c.derived("sum")
+    def total(numbers, config):
+        return sum(numbers or [])
+
+    @c.command("file")
+    def file(args, inputs, say):
+        return c.result(requests=[c.ask("post", a) for a in args], then=lambda answers: f"filed as line {answers[-1]}")
+
+    return c
+
+
+def test_a_readers_test_is_answered_from_its_own_expectations(tmp_path: Path) -> None:
+    from kern.component import KernError
+    from kern.fake import expecting
+
+    path = tmp_path / "reader.expect.toml"
+    path.write_text(READER_EXPECTS)
+    fake = expecting(reader(), path)
+    fake.derive("sum")
+    assert fake.out("sum").value == 0
+    fake.given("numbers stand")
+    fake.derive("sum")
+    assert fake.out("sum").value == 6
+    assert fake.run("file", "x", "y") == "filed as line 1"
+    with pytest.raises(KernError, match=re.escape(f'refused, as expect 3 (request post, ask "") of {path} expects')):
+        fake.run("file", "")
+    fake.given("two lines stand")
+    assert fake.run("file", "z") == "filed as line 3"
+    fake.derive("sum")
+    assert fake.out("sum").value == 0
+    with pytest.raises(KernError, match="is answered from"):
+        fake.seed(numbers=[9])
+    with pytest.raises(KernError, match="is answered from"):
+        fake.answer("post", lambda line: 9)
+    with pytest.raises(KernError, match='no expectation is given "the ledger burned"'):
+        fake.given("the ledger burned")
+
+
+def test_a_request_no_expectation_answers_fails_the_readers_test(tmp_path: Path) -> None:
+    from kern.component import KernError
+    from kern.fake import expecting
+
+    path = tmp_path / "reader.expect.toml"
+    path.write_text('[[expect]]\nname = "lines.append"\nrequest = "post"\nask = "only this"\nexact = ["ask"]\nanswer = 1\n')
+    fake = expecting(reader(), path)
+    with pytest.raises(KernError, match='no expectation answers the request "that" on port post: state it there'):
+        fake.run("file", "that")
+    bad = tmp_path / "bad.expect.toml"
+    bad.write_text('[[expect]]\nname = "n"\nport = "nowhere"\nvalue = 1\n')
+    with pytest.raises(expect.ExpectationError, match='reads no input "nowhere"'):
+        expecting(reader(), bad)

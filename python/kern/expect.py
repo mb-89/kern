@@ -65,7 +65,7 @@ class Expectation:
 
     def __str__(self) -> str:
         s = f"expect {self.n} ("
-        s += f"port {self.port}" if self.port else f"request {self.request}, ask {_show(self.ask)}"
+        s += f"port {self.port}" if self.port else f"request {self.request}, ask {show(self.ask)}"
         if self.given:
             s += f", given {json.dumps(self.given)}"
         return s + ")"
@@ -98,16 +98,16 @@ class Expectations:
                 if t is None:
                     errs.append(f'{e}: component {d.name} reads no input "{e.port}"')
                 elif not fits(plain(e.value), t):
-                    errs.append(f"{e}: value: {_show(e.value)} is no {t}")
+                    errs.append(f"{e}: value: {show(e.value)} is no {t}")
                 continue
             r = d.requests.get(e.request)
             if r is None:
                 errs.append(f'{e}: component {d.name} has no request port "{e.request}"')
                 continue
             if not fits(plain(e.ask), r.type):
-                errs.append(f"{e}: ask: {_show(e.ask)} is no {r.type}")
+                errs.append(f"{e}: ask: {show(e.ask)} is no {r.type}")
             if e.answer is not None and not fits(plain(e.answer), r.answer):
-                errs.append(f"{e}: answer: {_show(e.answer)} is no {r.answer}")
+                errs.append(f"{e}: answer: {show(e.answer)} is no {r.answer}")
         for i, c in enumerate(self.claims, 1):
             if c.port and c.port not in outputs:
                 errs.append(f'claim {i}: component {d.name} writes no output "{c.port}"')
@@ -217,23 +217,23 @@ def match(root: str, want: Any, got: Any, exact: list[str] | None = None) -> Non
 def _match(path: str, want: Any, got: Any, exact: set[str]) -> None:
     if path in exact:
         if not _equal(want, got):
-            raise ExpectationError(f"{path} is {_show(got)}, want {_show(want)}")
+            raise ExpectationError(f"{path} is {show(got)}, want {show(want)}")
         return
     if isinstance(want, bool):
         if not isinstance(got, bool):
-            raise ExpectationError(f"{path} is {_show(got)}, want true or false")
+            raise ExpectationError(f"{path} is {show(got)}, want true or false")
     elif isinstance(want, int):
         if not _number(got) or not float(got).is_integer():
-            raise ExpectationError(f"{path} is {_show(got)}, want an integer")
+            raise ExpectationError(f"{path} is {show(got)}, want an integer")
     elif isinstance(want, float):
         if not _number(got):
-            raise ExpectationError(f"{path} is {_show(got)}, want a number")
+            raise ExpectationError(f"{path} is {show(got)}, want a number")
     elif isinstance(want, str):
         if not isinstance(got, str):
-            raise ExpectationError(f"{path} is {_show(got)}, want a string")
+            raise ExpectationError(f"{path} is {show(got)}, want a string")
     elif isinstance(want, list):
         if not isinstance(got, list):
-            raise ExpectationError(f"{path} is {_show(got)}, want a list")
+            raise ExpectationError(f"{path} is {show(got)}, want a list")
         if want and not got:
             raise ExpectationError(f"{path} is an empty list, want at least one item")
         for i, item in enumerate(got):
@@ -249,7 +249,7 @@ def _match(path: str, want: Any, got: Any, exact: set[str]) -> None:
                 raise ExpectationError(f"item {i}: {first}")
     elif isinstance(want, dict):
         if not isinstance(got, dict):
-            raise ExpectationError(f"{path} is {_show(got)}, want a table")
+            raise ExpectationError(f"{path} is {show(got)}, want a table")
         for k in sorted(want):
             if k not in got:
                 raise ExpectationError(f"{path}.{k} is missing")
@@ -274,7 +274,7 @@ def _equal(want: Any, got: Any) -> bool:
     return want == got
 
 
-def _show(v: Any) -> str:
+def show(v: Any) -> str:
     """A value as the Go fake shows it: compact JSON, a whole float without its fraction."""
     def go(x: Any) -> Any:
         if isinstance(x, float) and x.is_integer():

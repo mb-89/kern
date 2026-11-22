@@ -5,6 +5,11 @@
 // speaks the component contract and nothing more. A call it runs with Begin
 // or BeginServe the test gives up as the core does (docs/go-core.md "A call
 // given up"): Abandon as call.core.abandon, Gone as the dead-caller check.
+//
+// Expecting answers a component's tests from its own expectation file
+// instead of seeds and answerers (README.md "Expectations"), so no test fakes
+// the component on the other side; Module.Meet holds a writer to the pooled
+// expectations it claims, and Check holds a wiring's components to every one.
 package kerntest
 
 import (
@@ -34,6 +39,10 @@ type Fake struct {
 	answers  map[string]Answerer
 	asked    []index.Ask
 	lines    []string
+	// expect, where set, answers the inputs and requests: the component's
+	// own expectations, under the givens its test names.
+	expect *Expectations
+	givens map[string]bool
 }
 
 // New takes a component, and refuses a broken declaration as the index's start would.
@@ -60,8 +69,97 @@ func New(c *index.Component) (*Fake, error) {
 	return f, nil
 }
 
-// Seed sets the value an input port reads; one it never seeds reads its type's zero value.
+// Expecting takes a component and its expectation file, path, and answers
+// its tests from that file alone: each input port reads the value its
+// expectation states, and each request gets the answer or the refusal of the
+// expectation whose ask it matches, under the givens Given names. Seed and
+// Answer are refused, so no test fakes the component on the other side.
+func Expecting(c *index.Component, path string) (*Fake, error) {
+	f, err := New(c)
+	if err != nil {
+		return nil, err
+	}
+	x, err := ReadExpectations(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := x.Check(c); err != nil {
+		return nil, err
+	}
+	f.expect = &x
+	return f, f.Given()
+}
+
+// Given names the preconditions the test runs under: each input port reads
+// the value of its expectation of one of these givens, else of the one with
+// none, else its type's zero value; a request is answered by a matching
+// expectation of these givens first, then by one with none. A given no
+// expectation names is refused.
+func (f *Fake) Given(givens ...string) error {
+	if f.expect == nil {
+		return fmt.Errorf("the fake of component %s reads no expectations: make it with Expecting", f.c.Name())
+	}
+	file := f.expect.File
+	known := map[string]bool{}
+	for _, e := range f.expect.Expect {
+		known[e.Given] = true
+	}
+	active := map[string]bool{}
+	for _, g := range givens {
+		if g == "" || !known[g] {
+			return fmt.Errorf("%s: no expectation is given %q", file, g)
+		}
+		active[g] = true
+	}
+	from := map[string]Expectation{}
+	for _, e := range f.expect.Expect {
+		if e.Port == "" {
+			continue
+		}
+		prev, ok := from[e.Port]
+		switch {
+		case e.Given == "" && !ok:
+			from[e.Port] = e
+		case e.Given != "" && active[e.Given]:
+			if ok && prev.Given != "" {
+				return fmt.Errorf("%s: %s and %s both read port %s: name one of their givens", file, prev, e, e.Port)
+			}
+			from[e.Port] = e
+		}
+	}
+	seeds := map[string]any{}
+	for port, e := range from {
+		v, err := convert(e.Value, f.inputs[port].Type)
+		if err != nil {
+			return fmt.Errorf("%s: %s: value: %w", file, e, err)
+		}
+		seeds[port] = v
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for port := range f.inputs {
+		if !strings.HasPrefix(port, index.ConfigPrefix) {
+			delete(f.seeded, port)
+		}
+	}
+	for port, v := range seeds {
+		f.seeded[port] = v
+	}
+	f.givens = active
+	return nil
+}
+
+// Seed sets the value an input port reads; one it never seeds reads its
+// type's zero value. A fake made with Expecting refuses it: the value is
+// stated in the expectation file.
 func (f *Fake) Seed(port string, v any) error {
+	if f.expect != nil {
+		return fmt.Errorf("component %s is answered from %s: state what port %s reads there", f.c.Name(), f.expect.File, port)
+	}
+	return f.seed(port, v)
+}
+
+func (f *Fake) seed(port string, v any) error {
 	p, ok := f.inputs[port]
 	switch {
 	case !ok:
@@ -76,10 +174,15 @@ func (f *Fake) Seed(port string, v any) error {
 }
 
 // Config sets a config key's value; one it never sets is the key's built-in value.
-func (f *Fake) Config(key string, v any) error { return f.Seed(index.ConfigPrefix+key, v) }
+func (f *Fake) Config(key string, v any) error { return f.seed(index.ConfigPrefix+key, v) }
 
-// Answer hands a request port the answerer of every request made on it.
+// Answer hands a request port the answerer of every request made on it. A
+// fake made with Expecting refuses it: the answer is stated in the
+// expectation file.
 func (f *Fake) Answer(port string, a Answerer) error {
+	if f.expect != nil {
+		return fmt.Errorf("component %s is answered from %s: state what request port %s is answered there", f.c.Name(), f.expect.File, port)
+	}
 	if _, ok := f.requests[port]; !ok {
 		return fmt.Errorf("component %s has no request port %q", f.c.Name(), port)
 	}
@@ -269,6 +372,9 @@ func (f *Fake) answerWithin(ctx context.Context, a index.Ask) (any, error) {
 }
 
 func (f *Fake) answer(a index.Ask) (any, error) {
+	if f.expect != nil {
+		return f.expected(a)
+	}
 	f.mu.Lock()
 	ans, ok := f.answers[a.Port]
 	f.mu.Unlock()
@@ -283,6 +389,29 @@ func (f *Fake) answer(a index.Ask) (any, error) {
 		return nil, fmt.Errorf("request port %s reads %s, and its answerer gave %T", a.Port, want, v)
 	}
 	return v, nil
+}
+
+// expected answers a request from the fake's expectations: the first whose
+// ask the request matches, of the test's givens first, then of none.
+func (f *Fake) expected(a index.Ask) (any, error) {
+	f.mu.Lock()
+	givens := f.givens
+	f.mu.Unlock()
+	for _, mine := range []func(Expectation) bool{
+		func(e Expectation) bool { return e.Given != "" && givens[e.Given] },
+		func(e Expectation) bool { return e.Given == "" },
+	} {
+		for _, e := range f.expect.Expect {
+			if e.Request != a.Port || !mine(e) || Match("ask", e.Ask, a.Value, e.Exact) != nil {
+				continue
+			}
+			if e.Refused {
+				return nil, fmt.Errorf("refused, as %s of %s expects", e, f.expect.File)
+			}
+			return convert(e.Answer, f.requests[a.Port].Ans)
+		}
+	}
+	return nil, fmt.Errorf("%s: no expectation answers the request %s on port %s: state it there", f.expect.File, show(a.Value), a.Port)
 }
 
 // Lines answers the progress lines every command run so far said, in order.
