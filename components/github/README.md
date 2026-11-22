@@ -78,6 +78,69 @@ watches for, the input keys an answer must carry equal, and how long to wait, up
   no one waits for (`docs/go-core.md` "A call given up").
 - Only the relay runs steps; with a token a command runs its GitHub steps itself.
 
+## Writes: filled templates only
+
+The component files an issue and comments on one, and only from a filled template: a write names
+a template and its fields, never a title or a body. It checks the fields against the template
+before anything reaches GitHub, refuses a fill the template refuses with every finding, and
+otherwise renders the title and the body from the fields and writes them. Every caller that writes
+through kern passes the same check: an agent host through the MCP door, a script through a
+command, another component through the verbs.
+
+| verb | asks | answers |
+|---|---|---|
+| `issue-create` | `github.issue-create`, `{"owner", "repo", "template", "fields", "labels"?}` | `github.written` |
+| `issue-comment` | `github.issue-comment`, `{"owner", "repo", "number", "template", "fields"}` | `github.written` |
+
+- **`github.written`** is `{"repo", "number", "url", "read", "via", "data"}`: the issue filed or
+  commented on, the link to what was written, when, through which backend, and GitHub's answer.
+- **No free text.** A request with any other key, a `body` or a `title` among them, is refused
+  before the template is read.
+- **The token** posts to REST (`POST /repos/<owner>/<repo>/issues`, `.../issues/<n>/comments`),
+  waiting out the pace and bounded by `RequestWait` on the clock, as a read is. A rate limit
+  refuses a write before GitHub takes it, so it is sent again, four times at most.
+- **The relay** runs the write as a [step](#the-verb-step-a-write-tool-through-the-relay) of the
+  session's own tool: `issue_write` with `method = "create"`, or `add_issue_comment`, with the
+  rendered title and body.
+
+### The commands, and the door's writing tool
+
+`github issue-create --repo OWNER/REPO --template NAME --fields JSON [--label LABEL]...` and
+`github issue-comment --repo OWNER/REPO --number N --template NAME --fields JSON` are writing
+commands (`writes = true`), which kern's MCP door serves as the tool `github_write` (kern's README
+"The MCP door"). Each asks its verb on a request port of its own, `file-issue` and `file-comment`,
+which the core delivers like any request: the ports are bound to the component's own verbs where
+the wiring binds them to nothing (`index.RequestPort.Self`). `--fields` is the fields as one JSON
+object; the answer names the issue and the link.
+
+### Templates
+
+A template is data, `<name>.json` in the folder the config key `templates` names (`.se/templates`
+by default, relative to the checkout). The application's own template engine writes it, so kern
+checks a fill without calling that engine. Each write reads it again, so a regenerated template
+counts at once.
+
+- **What kern reads:** `form`, the template's name, which must be the file's; `field_shape`, each
+  field's shape in order; `schema`, a JSON Schema 2020-12 of the fields. Other keys are read past.
+  - SE's `forms.py draft <form> --json` writes all three.
+  - Beside them, kern alone reads `markers` (the lines the body opens with), `actions` (the writes
+    the template serves, `issue.create` or `comment.create`; none names both) and `level` (its
+    headings' level, 2 by default).
+- **A field's shape:** `kind`, one of `line`, `choice`, `text`, `list`, `issue`, `checklist`,
+  `object` and `code`. Beside it: `heading`, `required`, `none_ok` (`None` fills it), `choices`,
+  `max_words`, `numbered`, `label` (a `<label>: <value>` line above the sections), `source = "title"`
+  (the issue's title, never in the body) and `lang` (a code block's).
+- **The check:** the fields against the schema's `type`, `properties`, `required`,
+  `additionalProperties`, `items` and `enum`. Then each field's shape: a required field filled,
+  `None` only where `none_ok` lets it stand, a choice among its choices, at most `max_words` words.
+  An issue's template needs a title field, and one whose `actions` lack the write is refused.
+  - A template engine's own rules beyond its schema and shapes, such as its prose rules, do not
+    reach kern: the application checks those where it renders.
+- **The render:** the markers, the label lines, then each body field with a value under its
+  heading, in the template's order: text as it stands, a list numbered or bulleted (an item that
+  is one whole HTML comment kept as it is), a checklist as `- [x]` items, an object as `key: value`
+  lines, code fenced.
+
 ## Telling the agent, on the hook
 
 On each `PostToolUse`, `UserPromptSubmit` and `SessionStart` the component tells the agent the
@@ -96,6 +159,7 @@ hook `additionalContext`. A PostToolUse that answered a step first waits up to `
 | `issue-list` | `{"owner", "repo", "state", "labels"}` | the list of the repository's issues in that state carrying every label |
 | `pull-list` | `{"owner", "repo", "state"}` | the list of the repository's pull requests in that state |
 | `step` | `github.step` | `github.step-answer`, the tool's answer |
+| `issue-create`, `issue-comment` | a filled template ([Writes](#writes-filled-templates-only)) | `github.written` |
 
 `state` is `open` (the default), `closed` or `all`; `labels` lists issues alone, since GitHub
 lists pull requests by none. A list read keeps the issues, not the pull requests GitHub's issues
@@ -111,7 +175,7 @@ each label in order, all in lower case, in its family:
 ```toml
 [instances.github]
 component = "github"
-# config = { backend = "auto", refresh = "2m", relay-wait = "0s", pace-max = "60s", step-wait = "60m", tell-wait = "300ms" }
+# config = { backend = "auto", refresh = "2m", relay-wait = "0s", pace-max = "60s", step-wait = "60m", tell-wait = "300ms", templates = ".se/templates" }
 
 [wires]
 "github.second" = "clock/second"          # the refresh's count of seconds; "built-in" refreshes nothing
@@ -134,7 +198,8 @@ built-in values.
 
 `expect.toml` claims `github.issues` and the read verbs' requests, `github.issue`, `github.pull`,
 `github.check-runs`, `github.comment-list`, `github.issue-list` and `github.pull-list`; `step`,
-which only the relay runs, is claimed by none. `hot_test.go` meets every expectation the
+which only the relay runs, and the write verbs `issue-create` and `issue-comment`, whose hot test
+would write to GitHub, are claimed by none. `hot_test.go` meets every expectation the
 checkout's readers pool under them, against the fake REST server in the normal suite and against
 GitHub itself in its hot test (kern's README "Hot tests"):
 
@@ -158,4 +223,8 @@ list_pull_requests' and get_comments' numbered pages, a list heard whole without
 both through the real core, from the
 hook's post to a client's read of the snapshot name. `step_test.go` holds the verb `step` and the
 telling: a step waits for the tool use that matches it and answers that tool's answer, and the hook
-of an answer tells the next step as the host's hook JSON.
+of an answer tells the next step as the host's hook JSON. `write_test.go` holds the writes: a comment
+rendered from each kind of field, the relay's `issue_write` step, a request with free text refused,
+and templates read or refused. `door_test.go` files an issue through kern's MCP door and the real
+core against the fake REST server, and holds a refused fill, free text and an absent template to
+reaching GitHub not at all.

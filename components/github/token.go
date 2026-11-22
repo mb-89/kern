@@ -115,16 +115,12 @@ func (c *rest) get(path string) (any, error) {
 // body and whether its Link header names a next page.
 func (c *rest) page(path string) (any, bool, error) {
 	for attempt := 1; ; attempt++ {
+		if err := c.paced("GET " + path); err != nil {
+			return nil, false, err
+		}
 		c.mu.Lock()
-		wait := c.until.Sub(c.clock.Now())
 		prev, held := c.cache[path]
 		c.mu.Unlock()
-		if wait > 0 {
-			if wait > c.paceMax {
-				return nil, false, fmt.Errorf("GET %s: rate limited for %v more, over pace-max %v", path, wait.Round(time.Second), c.paceMax)
-			}
-			c.sleep(wait)
-		}
 		ctx, cancel := host.Within(context.Background(), c.clock, RequestWait)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.api+path, nil)
 		if err != nil {
@@ -177,6 +173,22 @@ func (c *rest) page(path string) (any, bool, error) {
 		}
 		c.mu.Unlock()
 	}
+}
+
+// paced waits until the pace lets a request go, and fails one, named what,
+// whose wait is over paceMax.
+func (c *rest) paced(what string) error {
+	c.mu.Lock()
+	wait := c.until.Sub(c.clock.Now())
+	c.mu.Unlock()
+	if wait <= 0 {
+		return nil
+	}
+	if wait > c.paceMax {
+		return fmt.Errorf("%s: rate limited for %v more, over pace-max %v", what, wait.Round(time.Second), c.paceMax)
+	}
+	c.sleep(wait)
+	return nil
 }
 
 // limit answers how long a refusal asks to wait, where it is a rate limit:

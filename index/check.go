@@ -323,13 +323,23 @@ func (b *builder) inputs(refs []ref) {
 }
 
 // requests checks every request port is bound to a verb that takes its
-// request and gives its answer, of a switched-on instance where the asking one is on.
+// request and gives its answer, of a switched-on instance where the asking one
+// is on. A port the wiring binds to nothing is bound to its own component's
+// verb where it names one (RequestDecl.Self).
 func (b *builder) requests() {
 	for _, inst := range sortedKeys(b.ix.insts) {
 		in := b.ix.insts[inst]
 		for _, r := range in.comp.Requests() {
 			port := inst + "." + r.Port
 			t, bound := in.req[r.Port]
+			if !bound && r.Self != "" {
+				if _, ok := in.comp.verbs[r.Self]; !ok {
+					b.fail(in.line, "request port %s names its own verb %s, which component %s does not declare", port, r.Self, in.comp.Name())
+					continue
+				}
+				t, bound = target{inst: inst, verb: r.Self, line: in.line}, true
+				in.req[r.Port] = t
+			}
 			if !bound {
 				b.fail(in.line, "request port %s is bound to nothing: wire it to a verb of an I/O instance", port)
 				continue
