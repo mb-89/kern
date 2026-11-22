@@ -92,11 +92,16 @@ type Bus struct {
 // the bus refuses an answer sent later (a test's way to see a refused answer,
 // cli.ReplyWaitEnv). NATS's own default, two minutes, would refuse the answer
 // of every step that runs longer, however it beats, and the core would wait
-// out its step wait in silence. serverDefault is that default, the expiry a
-// reply permission that names none takes: zero or less, NATS's two minutes;
-// more, a test's way to shorten the limit the long step guards against
+// out its step wait in silence.
+func Start(instances []Instance, replyWait time.Duration) (*Bus, error) {
+	return StartWith(instances, replyWait, 0)
+}
+
+// StartWith is Start with serverDefault, the server's own expiry of a reply
+// permission that names none: zero or less, NATS's two minutes; more, a
+// test's way to shorten the limit the long step guards against
 // (cli.ReplyDefaultEnv), since NATS's own is a constant.
-func Start(instances []Instance, replyWait, serverDefault time.Duration) (*Bus, error) {
+func StartWith(instances []Instance, replyWait, serverDefault time.Duration) (*Bus, error) {
 	users := map[string]string{}
 	var accounts []*server.User
 	add := func(name string, perms *server.Permissions) error {
