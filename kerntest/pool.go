@@ -12,12 +12,22 @@ import (
 // each pools under: no key names a component.
 type Pool map[string][]Expectation
 
-// ReadPool reads the expectation files at paths into one pool.
+// ReadPool reads the expectation files at paths into one pool, each against
+// the base BaseVariable names, if any: an expectation that base does not hold
+// is new, and pending until its claimer meets it.
 func ReadPool(paths ...string) (Pool, error) {
+	return ReadPoolSince(environmentBase(), paths...)
+}
+
+// ReadPoolSince is ReadPool against base; a nil base holds every expectation.
+func ReadPoolSince(base Base, paths ...string) (Pool, error) {
 	p := Pool{}
 	for _, path := range paths {
 		x, err := ReadExpectations(path)
 		if err != nil {
+			return nil, err
+		}
+		if x, err = since(base, x); err != nil {
 			return nil, err
 		}
 		p.add(x)
@@ -58,22 +68,32 @@ func (m Module) read() (Expectations, error) {
 }
 
 // Meet holds m to every expectation in pool on the names it claims: each in a
-// fake of its own, after the setup of its given. It answers each one m does
-// not meet, naming the name, the expectation and the reader's file.
-func (m Module) Meet(pool Pool) error {
+// fake of its own, after the setup of its given. It fails on each one m does
+// not meet, naming the name, the expectation and the reader's file, except a
+// new one, which is pending: it answers those apart, for its test to report,
+// and appends them to ReportVariable's file, where it is set.
+func (m Module) Meet(pool Pool) ([]Pending, error) {
 	x, err := m.read()
 	if err != nil {
-		return err
+		return nil, err
 	}
+	var pending []Pending
 	var errs []error
 	for _, cl := range x.Claims {
 		for _, e := range pool[cl.Name] {
-			if err := m.meet(cl, e); err != nil {
+			err := m.meet(cl, e)
+			switch {
+			case err == nil:
+			case e.New:
+				p := Pending{Expectation: e, Claimer: m.Component.Name(), Why: err}
+				pending = append(pending, p)
+				errs = append(errs, report(p))
+			default:
 				errs = append(errs, unmet(m, e, err))
 			}
 		}
 	}
-	return errors.Join(errs...)
+	return pending, errors.Join(errs...)
 }
 
 func unmet(m Module, e Expectation, err error) error {

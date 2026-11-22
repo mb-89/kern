@@ -74,10 +74,10 @@ func TestAWritersTestMeetsThePooledExpectationsOfItsName(t *testing.T) {
 	if len(pool["numbers"]) != 2 || len(pool["lines.append"]) != 3 {
 		t.Fatalf("the pool holds %v", pool)
 	}
-	if err := count.Meet(pool); err != nil {
+	if _, err := count.Meet(pool); err != nil {
 		t.Errorf("counter meets numbers: %v", err)
 	}
-	if err := ledger.Meet(pool); err != nil {
+	if _, err := ledger.Meet(pool); err != nil {
 		t.Errorf("lines meets lines.append: %v", err)
 	}
 }
@@ -90,7 +90,7 @@ func TestAWriterThatDoesNotMeetAnExpectationFailsItsOwnTest(t *testing.T) {
 		t.Fatal(err)
 	}
 	count.Given = nil // it sets up no given, and counts nothing without one
-	err = count.Meet(pool)
+	_, err = count.Meet(pool)
 	for _, want := range []string{
 		`unmet: name "numbers": counter does not meet expect 2 (port numbers, given "numbers stand") of ` + reader.File + `: it sets up no given "numbers stand"`,
 	} {
@@ -99,7 +99,7 @@ func TestAWriterThatDoesNotMeetAnExpectationFailsItsOwnTest(t *testing.T) {
 		}
 	}
 	count.Given = map[string]kerntest.Setup{"numbers stand": func(f *kerntest.Fake) error { return nil }}
-	if err := count.Meet(pool); err == nil || !strings.Contains(err.Error(), "value is an empty list, want at least one item") {
+	if _, err := count.Meet(pool); err == nil || !strings.Contains(err.Error(), "value is an empty list, want at least one item") {
 		t.Errorf("a counter that counts nothing met numbers stand: %v", err)
 	}
 }

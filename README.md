@@ -306,6 +306,35 @@ verb = "append"
   `kerntest/testdata/expect-cases.json` holds the Go and Python readers to the same refusals and
   matches.
 
+### Pending expectations
+
+A reader's new expectation is an input to its reader, never an order to its claimer: it is pending
+until its claimer first meets it, and while it is pending it blocks only its reader. This is the
+person's decision of 22 Nov (deck "Who provides the fakes", option B), after Pact's pending pacts.
+
+- **No flag.** Nothing stores that an expectation is pending. The reader's check refuses to land a
+  change whose expectation its claimer does not meet, so every expectation the integration branch
+  holds is one its claimer met when it landed. An expectation is **new** where the reader's file
+  at the base holds none with the same terms (its place in the file does not count), and
+  **pending** where it is new and its claimer's test, run now, does not meet it.
+- **The base** is the git revision `KERN_EXPECT_BASE` names, such as `origin/main`, read with real
+  git by `kerntest.ReadPool` and `kerntest.Check`: the variable is the choice the git door asks
+  of a test binary, and the read only shows files. Unset, there is no base and every expectation
+  counts as landed, as on the integration branch itself. A file no repository holds counts as
+  landed; a file the base lacks is new throughout. `kerntest.ReadPoolSince(base, files...)` and
+  `kerntest.CheckSince(base, wiring, modules...)` take the base as a `kerntest.Base`, and
+  `kerntest.GitBase(backend, ref)` is the one `KERN_EXPECT_BASE` names.
+- **The claimer's test** stays green: `Module.Meet(pool)` answers the pending expectations apart
+  from its error, each a line `pending: name "numbers": expect 6 (port numbers, given "four numbers
+  stand") of tally.expect.toml waits on counter, which does not meet it yet: <why>`, which the test
+  logs. A landed expectation it does not meet fails it as `unmet`, as before.
+- **The reader's check** refuses the change with the same line, naming the claimer that must meet
+  it. Once the claimer meets it, the two land and the expectation is an ordinary one.
+- **The requests.** `go run ./tools/expect pending [--base origin/main]` runs kern's tests against
+  the base, each pending line appended to the file `KERN_PENDING` names, and lists the pending
+  expectations per claimer, so an integrator turns them into requests for that module. Its design
+  decides on each: it meets it, or declines it, a judgment call that climbs as an escalation.
+
 ## Release
 
 `release.toml` owns kern's version and where its release is published, a path under the home the
