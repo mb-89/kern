@@ -104,9 +104,14 @@ type CommandDecl struct {
 	// outside service. Only such a command is offered by kern's MCP door
 	// (package mcp), whatever its class.
 	ReadOnly bool
+	// Writes declares that it writes only through its requests, which the
+	// core delivers to the I/O verbs the wiring binds: kern's MCP door offers
+	// it as a writing tool. A command is read-only or writing, not both; one
+	// that is neither, as one that syncs the checkout, is in no tool.
+	Writes bool
 	// MCP is what an agent host reads of it as a tool of the MCP door: when
-	// to use it. The door's catalog check (mcp.Tools) refuses a read-only
-	// command without it.
+	// to use it. The door's catalog check (mcp.Tools) refuses a read-only or
+	// writing command without it.
 	MCP string
 }
 
@@ -661,6 +666,9 @@ func (c *Component) addCommand(k *command) {
 	}
 	if d.Class != Interactive && d.Class != Batch {
 		c.fail("command %q has no class: %s or %s", d.Name, Interactive, Batch)
+	}
+	if d.ReadOnly && d.Writes {
+		c.fail("command %q is declared read-only and writing: it is one or the other", d.Name)
 	}
 	if _, taken := c.commands[d.Name]; taken {
 		c.fail("command %q is declared twice", d.Name)
