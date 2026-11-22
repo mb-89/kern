@@ -22,6 +22,7 @@ named in the design's plan.
 | `mcp/` | the MCP door, `<name> mcp`: the catalog's read-only commands as tools over stdio ([The MCP door](#the-mcp-door)) | |
 | `cmd/kern/` | the bare binary: `kern start`, `kern status`, `kern stop`, `kern serve`, `kern hook`, carrying kern's shared components | |
 | `components/clock/` | the clock: time as names, `time` since its start 10 times a second, and `second`, `minute` and `hour` counting up, which a component reads instead of keeping a timer ([its README](components/clock/README.md)) | |
+| `components/files/` | the files component: the managed folders held in memory as names, reads and searches from the model, compare-and-swap writes, a watcher and a hash reconcile ([Files](#files), [its README](components/files/README.md)) | quackitect v4 `src/engine/indexwatch.go`, v5 `src/modules/files/watch.go` |
 | `components/github/` | the GitHub component: the token and relay backends and the snapshot names ([its README](components/github/README.md)) | the design's step 7 |
 | `components/session/` | the session record, off by default: one JSON line per host event, a file per session under `.se/.runtime/sessions/` ([its README](components/session/README.md)) | |
 | `contract/` | the contract suite: the built binary held to the bus's and the host's promises, and `cases.json` held against the Go fake, the Python fake and the real core with a Python component attached | |
@@ -204,6 +205,26 @@ SDK on `PYTHONPATH`.
   key standing, `{}` where none does, and its derivation runs once for a change at any key; an input
   of type `T` reads the family at the key that changed, once per key. A command may read a family
   only whole.
+
+## Files
+
+kern holds named values in memory with one writer each, and with the files component it holds
+files too, the warm model: an application names its managed folders in its settings (`folders`),
+and the component holds each managed file as names in the index: its path, its content hash and,
+below `content-limit`, its content. This is the person's decision of 22 Nov (deck "The warm model",
+option B).
+
+- **Reads and searches** over managed folders answer from the model, through its verbs `read`,
+  `list` and `search`.
+- **A write** through its verbs `write` and `remove` names the version it read and is refused,
+  naming "re-read", where the file changed since.
+- **A hand edit**, and a host without hooks, still write the disk past it, which is acceptable: a
+  file watcher keeps the model in step, a hash reconcile at start and on the watcher's overflow
+  catches what the watcher missed, and a cookie at start finds a deaf watcher out, after which
+  reads read the disk.
+- **Outside managed folders** nothing changes.
+
+The component's [README](components/files/README.md) is its contract.
 
 ## Tests
 

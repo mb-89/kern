@@ -1,0 +1,31 @@
+# What the files component claims (README.md "Expectations"): the names it writes and the requests
+# it answers. No reader in kern expects of it yet; its tests meet every expectation pooled under
+# these names against the real disk, a temporary folder, which is its outside thing.
+
+[[claim]]
+name = "files.model"
+port = "model"
+
+[[claim]]
+name = "files.watching"
+port = "watching"
+
+[[claim]]
+name = "files.read"
+verb = "read"
+
+[[claim]]
+name = "files.list"
+verb = "list"
+
+[[claim]]
+name = "files.search"
+verb = "search"
+
+[[claim]]
+name = "files.write"
+verb = "write"
+
+[[claim]]
+name = "files.remove"
+verb = "remove"
