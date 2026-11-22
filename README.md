@@ -261,78 +261,6 @@ option B).
 
 The component's [README](components/files/README.md) is its contract.
 
-## Language server
-
-Checks on managed files are served through the Language Server Protocol, the standard every editor
-speaks, and the language server uses the same checker as the tests: opening the files in an editor
-shows exactly what the tests would find. This is the person's decision of 22 Nov, after quackitect
-v5's `lsp` I/O module, whose one checker (`Sweep`) the editor's panel, the command line's `lint`
-and the battery all asked, so there was no second road.
-
-- **One checker.** Package `lint` holds the rules: each managed file's template or schema, links
-  that reach nothing, and names over their caps. The [lsp component](components/lsp/README.md)
-  runs it over the warm model ([Files](#files)), and its command `lsp lint` answers the findings.
-  Three roads ask it: the language server, `<name> lint`, and the tests through
-  `lsptest.Findings(root)`, which runs the checkout's files and lsp instances on an index of their
-  own. `components/lsp/lsp_test.go` holds the three to the same findings over one checkout.
-- **The server.** `<name> lsp` speaks the protocol over stdio. It answers the handshake at once
-  and starts the core, or attaches to it, beside the protocol, as the MCP door does, holding a
-  session lease while the editor is connected. It publishes the findings as diagnostics (an error
-  each, its rule as its code, `kern` as its source) on every managed file, not only the open ones,
-  and an empty list on a file whose findings are gone.
-- **Its redraw roads**, v5's: an open and each typed change check the editor's buffer in place of
-  the file (full sync); a save, a close and a change on the disk check the model, which the files
-  module keeps in step with the disk, and the server hears the lsp instance's `findings` change
-  on the bus (`val.<name>`).
-- **Beside it**, standard servers stay for what they do well: prose (`vale-ls`) and code
-  formatting (Biome). The editor runs them next to `<name> lsp`.
-
-### In VS Code
-
-VS Code starts a language server through an extension of its own, which names the command and the
-documents it serves. The editor runs `<name> lsp` in the folder it opened, the checkout, so the
-server finds the checkout as every verb does; `--root DIR` names another. A minimal extension is two
-files in a folder of their own, with `vscode-languageclient` installed beside them (`npm install
-vscode-languageclient`):
-
-`package.json`:
-
-```json
-{
-  "name": "kern-lsp",
-  "version": "0.0.1",
-  "engines": { "vscode": "^1.82.0" },
-  "main": "extension.js",
-  "activationEvents": ["workspaceContains:wiring.toml"],
-  "dependencies": { "vscode-languageclient": "^9.0.1" }
-}
-```
-
-`extension.js`:
-
-```js
-const { LanguageClient } = require("vscode-languageclient/node");
-
-let client;
-
-exports.activate = () => {
-  // kern's own binary is `kern`; an application names its own, such as `se`.
-  client = new LanguageClient("kern", "kern",
-    { command: "kern", args: ["lsp"] },
-    { documentSelector: [{ scheme: "file", language: "markdown" }, { scheme: "file", language: "json" }] });
-  return client.start();
-};
-
-exports.deactivate = () => client && client.stop();
-```
-
-Install it with `code --install-extension` on the folder packed by `npx @vscode/vsce package`, or
-open the folder in VS Code and run it with F5 (an Extension Development Host). The findings show in
-the editor and in the Problems panel, every managed file's, the closed ones too; the open Markdown
-and JSON buffers are checked as typed. The server's own log is the extension's output channel,
-`kern`. Another editor starts it the same way, with the command `<name> lsp` over stdio, such as
-Neovim's `vim.lsp.start({ name = "kern", cmd = { "kern", "lsp" }, root_dir = vim.fs.root(0, ".git") })`.
-
 ## Agent tools
 
 The person's decision of 22 Nov (deck "Files, templates and agent tools", lean routing): kern
@@ -427,6 +355,78 @@ core answers: with kern down every tool call passes, reads and searches included
 Copilot CLI's hooks reference (docs.github.com, copilot/reference/hooks-reference), VS Code's
 (code.visualstudio.com, docs/agents/reference/hooks-reference) and Claude Code's
 (code.claude.com, docs/en/hooks), each read 2026-11-22.
+
+## Language server
+
+Checks on managed files are served through the Language Server Protocol, the standard every editor
+speaks, and the language server uses the same checker as the tests: opening the files in an editor
+shows exactly what the tests would find. This is the person's decision of 22 Nov, after quackitect
+v5's `lsp` I/O module, whose one checker (`Sweep`) the editor's panel, the command line's `lint`
+and the battery all asked, so there was no second road.
+
+- **One checker.** Package `lint` holds the rules: each managed file's template or schema, links
+  that reach nothing, and names over their caps. The [lsp component](components/lsp/README.md)
+  runs it over the warm model ([Files](#files)), and its command `lsp lint` answers the findings.
+  Three roads ask it: the language server, `<name> lint`, and the tests through
+  `lsptest.Findings(root)`, which runs the checkout's files and lsp instances on an index of their
+  own. `components/lsp/lsp_test.go` holds the three to the same findings over one checkout.
+- **The server.** `<name> lsp` speaks the protocol over stdio. It answers the handshake at once
+  and starts the core, or attaches to it, beside the protocol, as the MCP door does, holding a
+  session lease while the editor is connected. It publishes the findings as diagnostics (an error
+  each, its rule as its code, `kern` as its source) on every managed file, not only the open ones,
+  and an empty list on a file whose findings are gone.
+- **Its redraw roads**, v5's: an open and each typed change check the editor's buffer in place of
+  the file (full sync); a save, a close and a change on the disk check the model, which the files
+  module keeps in step with the disk, and the server hears the lsp instance's `findings` change
+  on the bus (`val.<name>`).
+- **Beside it**, standard servers stay for what they do well: prose (`vale-ls`) and code
+  formatting (Biome). The editor runs them next to `<name> lsp`.
+
+### In VS Code
+
+VS Code starts a language server through an extension of its own, which names the command and the
+documents it serves. The editor runs `<name> lsp` in the folder it opened, the checkout, so the
+server finds the checkout as every verb does; `--root DIR` names another. A minimal extension is two
+files in a folder of their own, with `vscode-languageclient` installed beside them (`npm install
+vscode-languageclient`):
+
+`package.json`:
+
+```json
+{
+  "name": "kern-lsp",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.82.0" },
+  "main": "extension.js",
+  "activationEvents": ["workspaceContains:wiring.toml"],
+  "dependencies": { "vscode-languageclient": "^9.0.1" }
+}
+```
+
+`extension.js`:
+
+```js
+const { LanguageClient } = require("vscode-languageclient/node");
+
+let client;
+
+exports.activate = () => {
+  // kern's own binary is `kern`; an application names its own, such as `se`.
+  client = new LanguageClient("kern", "kern",
+    { command: "kern", args: ["lsp"] },
+    { documentSelector: [{ scheme: "file", language: "markdown" }, { scheme: "file", language: "json" }] });
+  return client.start();
+};
+
+exports.deactivate = () => client && client.stop();
+```
+
+Install it with `code --install-extension` on the folder packed by `npx @vscode/vsce package`, or
+open the folder in VS Code and run it with F5 (an Extension Development Host). The findings show in
+the editor and in the Problems panel, every managed file's, the closed ones too; the open Markdown
+and JSON buffers are checked as typed. The server's own log is the extension's output channel,
+`kern`. Another editor starts it the same way, with the command `<name> lsp` over stdio, such as
+Neovim's `vim.lsp.start({ name = "kern", cmd = { "kern", "lsp" }, root_dir = vim.fs.root(0, ".git") })`.
 
 ## Tests
 
