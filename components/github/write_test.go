@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"kern/components/github"
 	"kern/index"
@@ -59,11 +58,12 @@ config = { ` + config + ` }
 	return g, ix
 }
 
+// wiresOf wires the clock's second built-in, and the writer where it is one of more.
 func wiresOf(more []*index.Component) string {
 	if len(more) == 0 {
-		return ""
+		return "\n[wires]\n\"github.second\" = \"built-in\"\n"
 	}
-	return "\n[instances.writer]\ncomponent = \"writer\"\n\n[wires]\n\"writer.create\" = \"github.issue-create\"\n"
+	return "\n[instances.writer]\ncomponent = \"writer\"\n\n[wires]\n\"github.second\" = \"built-in\"\n\"writer.create\" = \"github.issue-create\"\n"
 }
 
 // A comment is posted from a filled template: its label line, then each
@@ -74,7 +74,7 @@ func TestACommentIsPostedFromAFilledTemplate(t *testing.T) {
 	f, srv := newFake(t)
 	f.created["/repos/alice/demo/issues/7/comments"] = `{"id": 99, "html_url": "https://github.com/alice/demo/issues/7#issuecomment-99"}`
 	dir := templates(t, map[string]string{"note": note, "report": report})
-	_, ix := writing(t, github.Options{Now: (&clock{now: nine}).Now, Token: token(""), Every: func(time.Duration, func()) {}},
+	_, ix := writing(t, github.Options{Clock: &clock{now: nine}, Token: token("")},
 		`backend = "token", api = "`+srv.URL+`", templates = '`+filepath.ToSlash(dir)+`'`)
 	fields := `{"status": "landed", "text": "It landed.", "checks": [{"done": true, "text": "suite"}, {"done": false, "text": "release"}],
 		"facts": [{"key": "pin", "value": "v5"}], "log": "go test ./...", "blocked_by": ["None"]}`
@@ -116,7 +116,7 @@ func TestACommentIsPostedFromAFilledTemplate(t *testing.T) {
 func TestTheRelayFilesThroughTheSessionsTool(t *testing.T) {
 	t.Parallel()
 	dir := templates(t, map[string]string{"report": report})
-	g, ix := writing(t, github.Options{Now: (&clock{now: nine}).Now, Token: noToken, Cloud: notCloud}, `step-wait = "10s", templates = '`+filepath.ToSlash(dir)+`'`)
+	g, ix := writing(t, github.Options{Clock: &clock{now: nine}, Token: noToken, Cloud: notCloud}, `step-wait = "10s", templates = '`+filepath.ToSlash(dir)+`'`)
 	done := make(chan called, 1)
 	go func() {
 		r, err := ix.Call("github issue-create", "--repo", "alice/demo", "--template", "report",
@@ -162,7 +162,7 @@ func TestAWriteVerbTakesNoFreeText(t *testing.T) {
 	f, srv := newFake(t)
 	f.created["/repos/alice/demo/issues"] = `{"number": 1}`
 	dir := templates(t, map[string]string{"report": report})
-	_, ix := writing(t, github.Options{Now: (&clock{now: nine}).Now, Token: token(""), Every: func(time.Duration, func()) {}},
+	_, ix := writing(t, github.Options{Clock: &clock{now: nine}, Token: token("")},
 		`backend = "token", api = "`+srv.URL+`", templates = '`+filepath.ToSlash(dir)+`'`, writer)
 	for _, key := range []string{"body", "title"} {
 		_, err := ix.Call("write", `{"owner": "alice", "repo": "demo", "template": "report", "fields": {"title": "t", "situation": "s", "requirements": ["r"]}, "`+key+`": "free text"}`)

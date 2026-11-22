@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"kern/host"
 	"kern/index"
 )
 
@@ -234,7 +235,7 @@ func (g *GitHub) createIssue(ctx context.Context, a NewIssue) (Written, error) {
 	default:
 		return Written{}, errors.New("github issue-create: the component has not started")
 	}
-	w.Read = g.o.Now().UTC()
+	w.Read = g.o.Clock.Now().UTC()
 	w.Number, w.URL = filed(w.Data)
 	return w, nil
 }
@@ -269,7 +270,7 @@ func (g *GitHub) comment(ctx context.Context, a NewComment) (Written, error) {
 	default:
 		return Written{}, errors.New("github issue-comment: the component has not started")
 	}
-	w.Read = g.o.Now().UTC()
+	w.Read = g.o.Clock.Now().UTC()
 	_, w.URL = filed(w.Data)
 	return w, nil
 }
@@ -303,7 +304,8 @@ func filed(data any) (int, string) {
 	return 0, link
 }
 
-// post sends one write to path, waiting out the pace as a read does; a rate
+// post sends one write to path, waiting out the pace as a read does, each
+// request bounded by RequestWait on the component's clock; a rate
 // limit refuses the write before GitHub takes it, so it is sent again, up to
 // attempts times. It answers GitHub's JSON.
 func (c *rest) post(path string, payload any) (any, error) {
@@ -315,8 +317,10 @@ func (c *rest) post(path string, payload any) (any, error) {
 		if err := c.paced("POST " + path); err != nil {
 			return nil, err
 		}
-		req, err := http.NewRequest(http.MethodPost, c.api+path, bytes.NewReader(data))
+		ctx, cancel := host.Within(context.Background(), c.clock, RequestWait)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.api+path, bytes.NewReader(data))
 		if err != nil {
+			cancel()
 			return nil, err
 		}
 		req.Header.Set("Accept", "application/vnd.github+json")
@@ -325,10 +329,12 @@ func (c *rest) post(path string, payload any) (any, error) {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 		resp, err := c.client.Do(req)
 		if err != nil {
+			cancel()
 			return nil, fmt.Errorf("POST %s: %w", path, err)
 		}
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		cancel()
 		if err != nil {
 			return nil, fmt.Errorf("POST %s: %w", path, err)
 		}
@@ -347,7 +353,7 @@ func (c *rest) post(path string, payload any) (any, error) {
 			return nil, fmt.Errorf("POST %s: %s, rate limited %d times", path, resp.Status, attempts)
 		}
 		c.mu.Lock()
-		if until := c.now().Add(pace); until.After(c.until) {
+		if until := c.clock.Now().Add(pace); until.After(c.until) {
 			c.until = until
 		}
 		c.mu.Unlock()

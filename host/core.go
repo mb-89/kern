@@ -223,7 +223,7 @@ func Serve(o Options) (*Core, error) {
 			c.types[in.Name][out.Port.Port] = out.Type
 		}
 	}
-	if c.bus, err = bus.StartWith(instances, o.ReplyWait, o.ReplyDefault); err != nil {
+	if c.bus, err = bus.StartWith(instances, o.ReplyWait, o.ReplyDefault, o.Clock.Now); err != nil {
 		return nil, fmt.Errorf("kern serve: %w", err)
 	}
 	if c.nc, err = bus.Dial(c.bus.URL(), bus.Core, c.bus.Users()[bus.Core]); err != nil {
@@ -278,8 +278,8 @@ func (c *Core) place() error {
 			continue
 		}
 		comp := comps[in.Component]
-		if !comp.Declared() && (len(comp.Derivations()) > 0 || len(comp.Commands()) > 0) {
-			return fmt.Errorf("kern serve: wiring line %d: instance %s is placed, and its component %s declares a derivation or a command, which runs in the core until a placed process answers run and cmd", in.CommandLine, in.Name, in.Component)
+		if !comp.Declared() && (len(comp.Derivations()) > 0 || len(comp.Commands()) > 0 || len(comp.Reaction()) > 0) {
+			return fmt.Errorf("kern serve: wiring line %d: instance %s is placed, and its component %s declares a derivation, a command or a reaction, which runs in the core until a placed process answers run and cmd", in.CommandLine, in.Name, in.Component)
 		}
 		c.placed[in.Name] = true
 	}
@@ -298,7 +298,7 @@ func (c *Core) answer() error {
 			c.reply(m, map[string]any{"pid": c.pid})
 			// The asker hangs up once it has the answer; one that stays on delays the stop by HangUp at most.
 			if m.Reply != "" {
-				c.bus.Unheard(m.Reply, c.o.HangUp)
+				c.bus.Unheard(m.Reply, c.o.HangUp, c.o.Clock.Now)
 			}
 			c.Stop("asked to stop")
 		}},

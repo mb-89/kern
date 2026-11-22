@@ -111,11 +111,14 @@ func TestTheDoorFilesAnIssueFromAFilledTemplate(t *testing.T) {
 	f, srv := newFake(t)
 	f.created["/repos/alice/demo/issues"] = `{"number": 12, "html_url": "https://github.com/alice/demo/issues/12", "title": "door-files"}`
 	dir := templates(t, map[string]string{"report": report})
-	g := github.New(github.Options{Now: (&clock{now: nine}).Now, Token: token(""), Cloud: notCloud, Every: func(time.Duration, func()) {}})
+	g := github.New(github.Options{Clock: &clock{now: nine}, Token: token(""), Cloud: notCloud})
 	w, err := index.ParseWiring([]byte(`
 [instances.github]
 component = "github"
 config = { backend = "token", api = "` + srv.URL + `", templates = '` + filepath.ToSlash(dir) + `' }
+
+[wires]
+"github.second" = "built-in"
 `))
 	if err != nil {
 		t.Fatal(err)

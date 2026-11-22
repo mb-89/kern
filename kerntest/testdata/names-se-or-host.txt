@@ -107,6 +107,7 @@ se-file	README.md	scripts/git_door.py
 se-file	README.md	scripts/se_workflows.py
 se-file	README.md	se.toml
 se-file	cli/cli.go	.se/wiring
+se-file	components/github/README.md	.se/templates
 se-file	components/github/github.go	.se/templates
 se-file	components/session/README.md	.se/wiring
 se-file	git/contract_test.go	scripts/adhoc.py

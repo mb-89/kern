@@ -17,10 +17,18 @@ import (
 	"kern/index"
 )
 
-// clock is the read times' clock; the case moves it.
+// clock is the component's clock; the case moves it. A wait on it ends when
+// the case moves it past the wait's end, a wait of 0 or less at once: no case
+// waits on the wall clock for one.
 type clock struct {
-	mu  sync.Mutex
-	now time.Time
+	mu    sync.Mutex
+	now   time.Time
+	waits []wait
+}
+
+type wait struct {
+	end time.Time
+	c   chan time.Time
 }
 
 func (c *clock) Now() time.Time {
@@ -29,10 +37,82 @@ func (c *clock) Now() time.Time {
 	return c.now
 }
 
+func (c *clock) After(d time.Duration) <-chan time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ch := make(chan time.Time, 1)
+	if d <= 0 {
+		ch <- c.now
+		return ch
+	}
+	c.waits = append(c.waits, wait{c.now.Add(d), ch})
+	return ch
+}
+
+// pending answers how many waits on the clock have not ended.
+func (c *clock) pending() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.waits)
+}
+
 func (c *clock) move(d time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.now = c.now.Add(d)
+	kept := c.waits[:0]
+	for _, w := range c.waits {
+		if c.now.Before(w.end) {
+			kept = append(kept, w)
+			continue
+		}
+		w.c <- c.now
+	}
+	c.waits = kept
+}
+
+// nowClock is the hot test's clock: its time from now, its waits the wall clock's.
+type nowClock func() time.Time
+
+func (n nowClock) Now() time.Time                       { return n() }
+func (nowClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
+
+// beat is the clock's second as the case writes it (components/clock), a
+// count that counts up: an I/O component whose one output the wiring binds
+// to beat/second.
+type beat struct {
+	component *index.Component
+	commit    index.Commit
+}
+
+var secondOut = index.Output("second", 0, "The clock's second, a count, as the case writes it.")
+
+func newBeat() *beat {
+	b := &beat{}
+	b.component = index.Declare("beat", "Writes the clock's second as the case moves it.", index.IO(), secondOut,
+		index.Inlet(func(_ string, _ index.Reader, commit index.Commit) error { b.commit = commit; return nil }))
+	return b
+}
+
+// at commits the second's count.
+func (b *beat) at(t *testing.T, count int) {
+	t.Helper()
+	if err := b.commit(secondOut.Set(count)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// beating makes a wiring source's second the beat's: its instance, and the wires
+// of beat/second, in place of the built-in second.
+func beating(t *testing.T, src string) index.Wiring {
+	t.Helper()
+	text := strings.Replace(src, `"github.second" = "built-in"`, `"github.second" = "beat/second"
+"beat.second" = "beat/second"`, 1)
+	out, err := index.ParseWiring([]byte("[instances.beat]\ncomponent = \"beat\"\n\n" + text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 var nine = time.Date(2026, 11, 13, 9, 0, 0, 0, time.UTC)
@@ -68,7 +148,15 @@ var reader = func() *index.Component {
 // wiring is a checkout's wiring with the component and the reader.
 func wiring(t *testing.T, config string) index.Wiring {
 	t.Helper()
-	w, err := index.ParseWiring([]byte(fmt.Sprintf(`
+	w, err := index.ParseWiring([]byte(wiringSrc(config)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return w
+}
+
+func wiringSrc(config string) string {
+	return fmt.Sprintf(`
 [instances.github]
 component = "github"
 config = { %s }
@@ -77,6 +165,7 @@ config = { %s }
 component = "reader"
 
 [wires]
+"github.second" = "built-in"
 "github.issues" = "github/issues/<key>"
 "github.pulls" = "github/pulls/<key>"
 "github.checks" = "github/checks/<key>"
@@ -84,11 +173,7 @@ component = "reader"
 "reader.issue" = "github.issue"
 "reader.pull" = "github.pull"
 "reader.checks" = "github.check-runs"
-`, config)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return w
+`, config)
 }
 
 // fakeGitHub is GitHub's REST API as the token backend reads it: an issue,
@@ -219,7 +304,7 @@ func TestTheTokenBackendReadsWithETags(t *testing.T) {
 	t.Parallel()
 	f, srv := newFake(t)
 	clk := &clock{now: nine}
-	_, ix := started(t, github.Options{Now: clk.Now, Token: token(""), Cloud: notCloud, Every: func(time.Duration, func()) {}},
+	_, ix := started(t, github.Options{Clock: clk, Token: token(""), Cloud: notCloud},
 		wiring(t, fmt.Sprintf(`backend = "auto", api = %q`, srv.URL)))
 	if v, _ := ix.Read("github/backend"); v.V != github.Token {
 		t.Fatalf("github/backend reads %v, and wants token where a token is found", v.V)
@@ -247,7 +332,7 @@ func TestTheTokenBackendReadsWithETags(t *testing.T) {
 func TestTheTokenBackendReadsAPullsCheckRuns(t *testing.T) {
 	t.Parallel()
 	_, srv := newFake(t)
-	_, ix := started(t, github.Options{Now: (&clock{now: nine}).Now, Token: token(""), Cloud: notCloud, Every: func(time.Duration, func()) {}},
+	_, ix := started(t, github.Options{Clock: &clock{now: nine}, Token: token(""), Cloud: notCloud},
 		wiring(t, fmt.Sprintf(`backend = "token", api = %q`, srv.URL)))
 	r, err := ix.Call("read", "checks", "alice", "demo", "8")
 	if err != nil || r.Text != "2 check runs, read 2026-11-13T09:00:00Z via token" {
@@ -261,17 +346,19 @@ func TestTheTokenBackendReadsAPullsCheckRuns(t *testing.T) {
 }
 
 // The refresh reads each snapshot the token holds again, with its ETag, and
-// a changed answer moves the snapshot.
+// a changed answer moves the snapshot. It runs on the clock's second, a
+// count: the case writes the count itself, and the relay holds the refresh
+// back until refresh, 2m, has passed in counts since the first one, 120; no
+// case waits on the wall clock.
 func TestTheRefreshReadsEverySnapshotAgain(t *testing.T) {
 	t.Parallel()
 	f, srv := newFake(t)
 	clk := &clock{now: nine}
-	var every time.Duration
-	var refresh func()
-	_, ix := started(t, github.Options{Now: clk.Now, Token: token(""), Cloud: notCloud, Every: func(d time.Duration, fn func()) { every, refresh = d, fn }},
-		wiring(t, fmt.Sprintf(`api = %q`, srv.URL)))
-	if every != 2*time.Minute || refresh == nil {
-		t.Fatalf("the refresh runs every %v, and wants every 2m", every)
+	b := newBeat()
+	g := github.New(github.Options{Clock: clk, Token: token(""), Cloud: notCloud, Go: func(fn func()) { fn() }})
+	ix, err := index.Start(beating(t, wiringSrc(fmt.Sprintf(`api = %q`, srv.URL))), g.Component, reader, b.component)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if _, err := ix.Call("read", "issue", "alice", "demo", "7"); err != nil {
 		t.Fatal(err)
@@ -279,14 +366,46 @@ func TestTheRefreshReadsEverySnapshotAgain(t *testing.T) {
 	f.mu.Lock()
 	f.bodies["/repos/alice/demo/issues/7"] = `{"number": 7, "title": "One issue, renamed", "state": "closed"}`
 	f.mu.Unlock()
+	reads := func() string { _, answered := f.log(); return fmt.Sprint(answered) }
+	for _, count := range []int{5, 6, 65, 124} {
+		b.at(t, count)
+		if got := reads(); got != "[200]" {
+			t.Fatalf("at the second %d GitHub answered %v, and wants no refresh before 120 counts from 5: [200]", count, got)
+		}
+	}
 	clk.move(2 * time.Minute)
-	refresh()
+	b.at(t, 125)
 	s := snapshot(t, ix, "github/issues/alice.demo.7")
 	if s.Read != nine.Add(2*time.Minute) || s.Data.(map[string]any)["title"] != "One issue, renamed" {
 		t.Fatalf("after the refresh the snapshot is %+v", s)
 	}
-	if _, answered := f.log(); fmt.Sprint(answered) != "[200 200]" {
-		t.Fatalf("GitHub answered %v, and wants the changed issue read again: [200 200]", answered)
+	if got := reads(); got != "[200 200]" {
+		t.Fatalf("GitHub answered %v, and wants the changed issue read again: [200 200]", got)
+	}
+	b.at(t, 185)
+	if got := reads(); got != "[200 200]" {
+		t.Fatalf("a second 60 counts after the refresh refreshed again: GitHub answered %v", got)
+	}
+}
+
+// A wiring that leaves the second built-in, or a refresh of 0s, refreshes nothing.
+func TestNoSecondOrNoRefreshRefreshesNothing(t *testing.T) {
+	t.Parallel()
+	f, srv := newFake(t)
+	b := newBeat()
+	g := github.New(github.Options{Clock: &clock{now: nine}, Token: token(""), Cloud: notCloud, Go: func(fn func()) { fn() }})
+	ix, err := index.Start(beating(t, wiringSrc(fmt.Sprintf(`api = %q, refresh = "0s"`, srv.URL))), g.Component, reader, b.component)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ix.Call("read", "issue", "alice", "demo", "7"); err != nil {
+		t.Fatal(err)
+	}
+	for _, count := range []int{0, 3600, 7200} {
+		b.at(t, count)
+	}
+	if _, answered := f.log(); fmt.Sprint(answered) != "[200]" {
+		t.Fatalf("a refresh of 0s refreshed: GitHub answered %v", answered)
 	}
 }
 
@@ -328,7 +447,7 @@ func TestTheTokenBackendPacesOnRateLimits(t *testing.T) {
 			f.refusals = append(f.refusals, c.refusal)
 			clk := &clock{now: nine}
 			var slept []time.Duration
-			_, ix := started(t, github.Options{Now: clk.Now, Token: token(""), Cloud: notCloud, Every: func(time.Duration, func()) {},
+			_, ix := started(t, github.Options{Clock: clk, Token: token(""), Cloud: notCloud,
 				Sleep: func(d time.Duration) { slept = append(slept, d); clk.move(d) }},
 				wiring(t, fmt.Sprintf(`api = %q`, srv.URL)))
 			r, err := ix.Call("read", "issue", "alice", "demo", "7")
@@ -351,7 +470,7 @@ func TestTheTokenBackendPacesOnRateLimits(t *testing.T) {
 func TestAutoTakesTheRelayInACloudSession(t *testing.T) {
 	t.Parallel()
 	for backend, want := range map[string]string{"auto": github.Relay, "token": github.Token} {
-		_, ix := started(t, github.Options{Token: token(""), Cloud: func() bool { return true }, Every: func(time.Duration, func()) {}},
+		_, ix := started(t, github.Options{Token: token(""), Cloud: func() bool { return true }},
 			wiring(t, fmt.Sprintf(`backend = %q`, backend)))
 		if v, _ := ix.Read("github/backend"); v.V != want {
 			t.Fatalf("backend %s in a cloud session reads %v, and wants %s", backend, v.V, want)
@@ -387,7 +506,7 @@ var issueRead = map[string]any{"method": "get", "owner": "alice", "repo": "demo"
 func TestTheRelayAsksOnTheOutboxAndPostToolUseAnswers(t *testing.T) {
 	t.Parallel()
 	clk := &clock{now: nine}
-	_, ix := started(t, github.Options{Now: clk.Now, Token: noToken}, wiring(t, ``))
+	_, ix := started(t, github.Options{Clock: clk, Token: noToken}, wiring(t, ``))
 	if v, _ := ix.Read("github/backend"); v.V != github.Relay {
 		t.Fatalf("github/backend reads %v, and wants relay where no token is found", v.V)
 	}
@@ -424,7 +543,7 @@ func TestTheRelayAsksOnTheOutboxAndPostToolUseAnswers(t *testing.T) {
 // With relay-wait, a read waits for the session's answer and is answered by it.
 func TestARelayReadWaitsForTheToolAnswer(t *testing.T) {
 	t.Parallel()
-	_, ix := started(t, github.Options{Now: (&clock{now: nine}).Now, Token: noToken}, wiring(t, `relay-wait = "10s"`))
+	_, ix := started(t, github.Options{Clock: &clock{now: nine}, Token: noToken}, wiring(t, `relay-wait = "10s"`))
 	go func() {
 		for {
 			if v, _ := ix.Read("github/outbox/check-runs.alice.demo.8"); v.Provided {
@@ -442,11 +561,46 @@ func TestARelayReadWaitsForTheToolAnswer(t *testing.T) {
 	}
 }
 
+// relay-wait measures against the component's clock: a read that no answer
+// reaches fails once the clock moves past its wait, naming the step, and not
+// before; the case moves the clock and never waits the 10s out.
+func TestARelayReadFailsWhenItsClockPassesItsWait(t *testing.T) {
+	t.Parallel()
+	clk := &clock{now: nine}
+	_, ix := started(t, github.Options{Clock: clk, Token: noToken}, wiring(t, `relay-wait = "10s"`))
+	failed := make(chan error, 1)
+	go func() {
+		_, err := ix.Call("read", "issue", "alice", "demo", "7")
+		failed <- err
+	}()
+	for clk.pending() == 0 {
+		time.Sleep(time.Millisecond) // the read asks its step and waits at once
+	}
+	if v, _ := ix.Read("github/outbox/issue.alice.demo.7"); !v.Provided {
+		t.Fatal("the waiting read stands in no outbox step")
+	}
+	clk.move(9 * time.Second)
+	select {
+	case err := <-failed:
+		t.Fatalf("the read failed at 9s of a 10s wait: %v", err)
+	default:
+	}
+	clk.move(time.Second)
+	select {
+	case err := <-failed:
+		if err == nil || !strings.Contains(err.Error(), "outbox step issue.alice.demo.7") {
+			t.Fatalf("the read past its wait answers %v, and wants it failed naming its outbox step", err)
+		}
+	case <-time.After(10 * time.Second): // bounds a failure that comes at once
+		t.Fatal("the read did not fail once its clock passed its wait")
+	}
+}
+
 // Every GitHub tool answer lands, asked or not; other tools, other methods,
 // other events and error answers write nothing.
 func TestEveryGitHubToolAnswerLandsAndNothingElse(t *testing.T) {
 	t.Parallel()
-	_, ix := started(t, github.Options{Now: (&clock{now: nine}).Now, Token: noToken}, wiring(t, ``))
+	_, ix := started(t, github.Options{Clock: &clock{now: nine}, Token: noToken}, wiring(t, ``))
 	before := ix.Snapshot().Revision()
 	for _, p := range [][]byte{
 		toolUse("Bash", map[string]any{"command": "ls"}, "{}"),
@@ -482,6 +636,9 @@ func TestTheComponentSwitchesOff(t *testing.T) {
 [instances.github]
 component = "github"
 enabled = false
+
+[wires]
+"github.second" = "built-in"
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -504,12 +661,13 @@ enabled = false
 // its snapshot name, which a client reads with its read time.
 func TestAHookPostLandsASnapshotInTheCore(t *testing.T) {
 	t.Parallel()
-	g := github.New(github.Options{Now: (&clock{now: nine}).Now, Token: noToken})
+	g := github.New(github.Options{Clock: &clock{now: nine}, Token: noToken})
 	w, err := index.ParseWiring([]byte(`
 [instances.github]
 component = "github"
 
 [wires]
+"github.second" = "built-in"
 "github.issues" = "github/issues/<key>"
 `))
 	if err != nil {

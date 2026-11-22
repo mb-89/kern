@@ -160,7 +160,7 @@ func runStop(c *Call) int {
 	if !ok {
 		return 2
 	}
-	pid, err := host.AskStop(dir)
+	pid, err := host.AskStop(host.Wall{}, dir)
 	if err != nil {
 		fmt.Fprintln(c.Stderr, err)
 		return 2

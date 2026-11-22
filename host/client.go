@@ -81,8 +81,9 @@ func health(s Standing) (Health, error) {
 // AskStop stops the core in the checkout at root and waits until its process
 // has exited, so the caller meets no running core after it, and Windows lets
 // the checkout's folders go. Where the core does not answer, its process is
-// killed. It answers the pid stopped, or zero where none ran.
-func AskStop(root string) (int, error) {
+// killed. It answers the pid stopped, or zero where none ran. Its wait for
+// the exit measures against clock.
+func AskStop(clock Clock, root string) (int, error) {
 	s, err := ReadStanding(root)
 	if errors.Is(err, ErrNotRunning) {
 		return 0, nil
@@ -102,9 +103,9 @@ func AskStop(root string) (int, error) {
 			_ = p.Kill()
 		}
 	}
-	end := time.Now().Add(exitWait)
+	end := clock.Now().Add(exitWait)
 	for alive(s.Pid) {
-		if time.Now().After(end) {
+		if clock.Now().After(end) {
 			return s.Pid, fmt.Errorf("kern stop: pid %d still runs %v after the stop", s.Pid, exitWait)
 		}
 		time.Sleep(exitLook)
@@ -118,10 +119,10 @@ func AskStop(root string) (int, error) {
 // WaitRunning asks the status until the core answers, it ended at its start,
 // or the wait is out.
 func WaitRunning(clock Clock, root string, wait time.Duration) (Status, error) {
-	end := time.Now().Add(wait)
+	end := clock.Now().Add(wait)
 	for {
 		st, err := AskStatus(clock, root)
-		if err != nil || st.State == StateRunning || st.Died != "" || !time.Now().Before(end) {
+		if err != nil || st.State == StateRunning || st.Died != "" || !clock.Now().Before(end) {
 			return st, err
 		}
 		time.Sleep(time.Millisecond)

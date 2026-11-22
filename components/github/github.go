@@ -26,6 +26,8 @@ import (
 	"sync"
 	"time"
 
+	"kern/components/clock"
+	"kern/host"
 	"kern/index"
 )
 
@@ -125,16 +127,20 @@ func outboxKey(k kind, r Ref) string { return k.verb + "." + Key(r) }
 // Options are what the component reaches the outside with; each has a
 // default, and a test replaces them.
 type Options struct {
-	// Now is the clock read times come from.
-	Now func() time.Time
+	// Clock is the time reads are stamped with and every wait is measured
+	// against: the relay's waits, a step's wait and a tell's, and the pacing
+	// of a rate limit. The wall clock where none is given; a test hands in a
+	// clock it moves itself.
+	Clock host.Clock
 	// Token answers the token, or "" where none is found.
 	Token func() (string, error)
 	// Client is the token backend's HTTP client.
 	Client *http.Client
-	// Sleep waits out a rate limit.
+	// Sleep waits out a rate limit: a wait on Clock where none is given.
 	Sleep func(time.Duration)
-	// Every runs fn every d until the process ends: the token backend's refresh.
-	Every func(d time.Duration, fn func())
+	// Go runs the refresh the clock's second makes due, so a slow GitHub
+	// never holds the clock: a goroutine of its own where none is given.
+	Go func(fn func())
 	// Cloud says whether the core runs in a cloud session, where no token
 	// reaches code and auto takes the relay: CLAUDE_CODE_REMOTE=true.
 	Cloud func() bool
@@ -146,27 +152,28 @@ type GitHub struct {
 	Component *index.Component
 	o         Options
 
-	mu       sync.Mutex
-	instance string
-	commit   index.Commit
-	backend  string
-	rest     *rest
-	fresh    time.Duration
-	wait     time.Duration
-	held     map[string]func() // the reads the token backend refreshes, by outbox key
-	waiting  map[string][]chan any
-	outbox   map[string]Step   // the relay's open steps, by outbox key
-	pages    map[string]*pages // the relay's paged reads under way, by outbox key
-	last     map[string]any    // the newest Snapshot or List of each read, by outbox key
-	stepWait time.Duration
-	tellWait time.Duration
-	// templates is the folder the write verbs read their templates from.
-	templates string
-	answered  map[string]bool         // the PostToolUse payloads that answered a step, until their tell
-	steps     map[string]*waitingStep // the steps of the verb step waiting for a tool answer, by outbox key
-	done      []answeredStep          // the numbered steps answered last, oldest first, up to keepAnswered
-	stale     map[string]string       // the PostToolUse payloads that answered an answered step, with their refusal, until their tell
-	asked     chan struct{}           // signalled each time a step is asked, which a tell waits for
+	mu         sync.Mutex
+	instance   string
+	commit     index.Commit
+	backend    string
+	rest       *rest
+	fresh      time.Duration
+	wait       time.Duration
+	held       map[string]func() // the reads the token backend refreshes, by outbox key
+	waiting    map[string][]chan any
+	outbox     map[string]Step   // the relay's open steps, by outbox key
+	pages      map[string]*pages // the relay's paged reads under way, by outbox key
+	last       map[string]any    // the newest Snapshot or List of each read, by outbox key
+	stepWait   time.Duration
+	tellWait   time.Duration
+	answered   map[string]bool         // the PostToolUse payloads that answered a step, until their tell
+	steps      map[string]*waitingStep // the steps of the verb step waiting for a tool answer, by outbox key
+	done       []answeredStep          // the numbered steps answered last, oldest first, up to keepAnswered
+	stale      map[string]string       // the PostToolUse payloads that answered an answered step, with their refusal, until their tell
+	asked      chan struct{}           // signalled each time a step is asked, which a tell waits for
+	templates  string                  // the folder the write verbs read their templates from
+	relay      clock.Relay             // the refresh's: due once refresh has passed on the clock's second
+	refreshing bool                    // a refresh runs
 }
 
 // The component's outputs.
@@ -195,29 +202,24 @@ func (k kind) out() *index.FamilyPort[Snapshot] {
 
 // New makes the component with its outside reached through o.
 func New(o Options) *GitHub {
-	if o.Now == nil {
-		o.Now = time.Now
+	if o.Clock == nil {
+		o.Clock = host.Wall{}
 	}
 	if o.Token == nil {
 		o.Token = FindToken
 	}
 	if o.Client == nil {
-		o.Client = &http.Client{Timeout: 30 * time.Second}
+		o.Client = &http.Client{} // each request's limit is RequestWait, on Clock
 	}
 	if o.Sleep == nil {
-		o.Sleep = time.Sleep
+		clk := o.Clock
+		o.Sleep = func(d time.Duration) { <-clk.After(d) }
 	}
 	if o.Cloud == nil {
 		o.Cloud = func() bool { return os.Getenv("CLAUDE_CODE_REMOTE") == "true" }
 	}
-	if o.Every == nil {
-		o.Every = func(d time.Duration, fn func()) {
-			go func() {
-				for range time.Tick(d) {
-					fn()
-				}
-			}()
-		}
+	if o.Go == nil {
+		o.Go = func(fn func()) { go fn() }
 	}
 	g := &GitHub{o: o, held: map[string]func(){}, waiting: map[string][]chan any{}, outbox: map[string]Step{}, pages: map[string]*pages{}, last: map[string]any{},
 		answered: map[string]bool{}, stale: map[string]string{}, steps: map[string]*waitingStep{}, asked: make(chan struct{}, 1)}
@@ -225,7 +227,7 @@ func New(o Options) *GitHub {
 		index.IO(),
 		index.Config("backend", Auto, "auto, token or relay: auto takes the relay in a cloud session, else the token where one is found, else the relay."),
 		index.Config("api", "https://api.github.com", "The REST API the token backend reads."),
-		index.Config("refresh", "2m", "How often the token backend reads each snapshot it holds again, with its ETag; 0s reads none again. The relay answers a snapshot younger than it without asking."),
+		index.Config("refresh", "2m", "How often the token backend reads each snapshot it holds again, with its ETag, counted on the clock's second it reads; 0s reads none again. The relay answers a snapshot younger than it without asking."),
 		index.Config("relay-wait", "0s", "How long a relay read waits for the session's tool answer before it fails, naming the outbox step."),
 		index.Config("pace-max", "60s", "The longest rate-limit wait the token backend sits out; a longer one fails the read."),
 		index.Config("step-wait", "60m", "The longest a step of the verb step waits for the session's tool answer; a step asks its own wait up to it."),
@@ -233,6 +235,7 @@ func New(o Options) *GitHub {
 		index.Config("templates", ".se/templates", "The folder the write verbs read each template from, <name>.json, as the application generates it; relative to the checkout."),
 		issuesOut, pullsOut, checksOut, commentsOut, issueListsOut, pullListsOut, outboxOut, backendOut,
 		index.Inlet(g.start),
+		index.Reacts(g.second),
 		index.Hears(g.hear),
 		index.Tells(g.tell),
 		index.JSONVerb("step", "Runs one GitHub tool call through the relay: the step stands in the outbox until a PostToolUse of that tool with those arguments answers it, and the verb answers the tool's answer.", StepShape, StepAnswerShape, func(ctx context.Context, a StepAsk) (StepAnswer, error) {
@@ -279,7 +282,7 @@ func FindToken() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// start chooses the backend and, for the token, starts the refresh.
+// start chooses the backend; the token's refresh runs on the clock's second.
 func (g *GitHub) start(instance string, read index.Reader, commit index.Commit) error {
 	str := func(key string) string { v, _ := read(index.ConfigPrefix + key).(string); return v }
 	dur := func(key string) (time.Duration, error) {
@@ -340,16 +343,47 @@ func (g *GitHub) start(instance string, read index.Reader, commit index.Commit) 
 	g.stepWait, g.tellWait = stepWait, tellWait
 	g.templates = str("templates")
 	if backend == Token {
-		g.rest = &rest{api: strings.TrimSuffix(str("api"), "/"), token: token, client: g.o.Client, sleep: g.o.Sleep, now: g.o.Now, paceMax: paceMax, cache: map[string]cached{}}
+		g.rest = &rest{api: strings.TrimSuffix(str("api"), "/"), token: token, client: g.o.Client, sleep: g.o.Sleep, clock: g.o.Clock, paceMax: paceMax, cache: map[string]cached{}}
 	}
 	g.mu.Unlock()
 	if err := commit(backendOut.Set(backend)); err != nil {
 		return err
 	}
-	if backend == Token && refresh > 0 {
-		g.o.Every(refresh, g.Refresh)
-	}
 	return nil
+}
+
+// second is the component's reaction to the clock's second, a count that
+// counts up (components/clock): its relay returns at once until refresh, in
+// whole seconds and at least one, has passed in counts since the last
+// refresh, and then the token backend's refresh runs, on its own, unless the
+// last one still runs. A wiring that leaves second built-in reads 0 for good,
+// and refreshes nothing.
+func (g *GitHub) second(_ string, in struct {
+	Second int `index:"second"`
+}) {
+	g.mu.Lock()
+	backend, refresh := g.backend, g.fresh
+	g.mu.Unlock()
+	every := 0
+	if refresh > 0 {
+		every = max(1, int(refresh/time.Second))
+	}
+	if backend != Token || !g.relay.Due(in.Second, every) {
+		return
+	}
+	g.mu.Lock()
+	if g.refreshing {
+		g.mu.Unlock()
+		return
+	}
+	g.refreshing = true
+	g.mu.Unlock()
+	g.o.Go(func() {
+		g.Refresh()
+		g.mu.Lock()
+		g.refreshing = false
+		g.mu.Unlock()
+	})
 }
 
 // read answers one read through the backend chosen at start.
@@ -364,7 +398,7 @@ func (g *GitHub) read(k kind, r Ref) (Snapshot, error) {
 	case Token:
 		return g.readToken(rest, k, r)
 	case Relay:
-		v, err := g.ask(k.verb, Key(r), outboxKey(k, r), stepOf(k, r, g.o.Now()))
+		v, err := g.ask(k.verb, Key(r), outboxKey(k, r), stepOf(k, r, g.o.Clock.Now()))
 		s, _ := v.(Snapshot)
 		return s, err
 	}
@@ -377,7 +411,7 @@ func (g *GitHub) readToken(rest *rest, k kind, r Ref) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("github %s %s: %w", k.verb, Key(r), err)
 	}
-	s := Snapshot{Repo: repoOf(r.Owner, r.Repo), Number: r.Number, Read: g.o.Now().UTC(), Via: Token, Data: data}
+	s := Snapshot{Repo: repoOf(r.Owner, r.Repo), Number: r.Number, Read: g.o.Clock.Now().UTC(), Via: Token, Data: data}
 	ob := outboxKey(k, r)
 	g.mu.Lock()
 	g.held[ob] = func() { _, _ = g.readToken(rest, k, r) }

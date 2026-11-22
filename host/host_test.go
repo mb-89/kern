@@ -95,6 +95,14 @@ func (c *clock) Now() time.Time {
 	return c.now
 }
 func (c *clock) After(time.Duration) <-chan time.Time { return make(chan time.Time) }
+
+// beating is the case's clock whose waits are the wall clock's: for a case
+// that shortened the call's beat to milliseconds and hears it beat, while
+// its time stands still, so no lease or idle end comes.
+type beating struct{ *clock }
+
+func (beating) After(d time.Duration) <-chan time.Time { return time.After(d) }
+
 func (c *clock) move(d time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -305,17 +313,37 @@ func TestAClientStopsTheCore(t *testing.T) {
 }
 
 // A client that stays on after the stop's answer delays the stop by HangUp at
-// most, shortened here to 50 ms.
+// most, measured on the core's clock: the core runs on while its clock stands
+// still, and ends once the case moves it past HangUp, an hour that no case
+// waits out.
 func TestAStopEndsTheCoreThoughItsAskerStaysOn(t *testing.T) {
 	t.Parallel()
-	const hangUp = 50 * time.Millisecond
-	c := served(t, host.Options{Clock: newClock(), HangUp: hangUp})
+	const hangUp = time.Hour
+	clk := newClock()
+	c := served(t, host.Options{Clock: clk, HangUp: hangUp})
 	var said map[string]int
-	asked := time.Now()
 	ask(t, as(t, c, bus.Client), host.StopSubject, nil, &said)
-	ended(t, c, "asked to stop")
-	if took := time.Since(asked); took < hangUp || took > hangUp+wait {
-		t.Fatalf("the core ends %v after the stop, and wants about %v", took, hangUp)
+	select {
+	case <-c.Ended():
+		t.Fatal("the core ended though its asker stays on and its clock stands still")
+	default:
+	}
+	end := time.Now().Add(wait)
+	for moved := false; ; moved = true {
+		select {
+		case <-c.Ended():
+			if !moved {
+				t.Fatal("the core ended before its clock moved past HangUp")
+			}
+			ended(t, c, "asked to stop")
+			return
+		default:
+		}
+		if !time.Now().Before(end) {
+			t.Fatal("the core runs on though its clock moved past HangUp")
+		}
+		clk.move(hangUp) // the stop's wait reads its end once it begins; each move passes it
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -542,7 +570,7 @@ func TestACommitOfTheWrongTypeIsRefused(t *testing.T) {
 	}
 }
 
-// A placed instance that declares a derivation or a command is refused at start, with its wiring line.
+// A placed instance that declares a derivation, a command or a reaction is refused at start, with its wiring line.
 func TestAPlacementTheCoreCannotRunIsRefused(t *testing.T) {
 	t.Parallel()
 	tally := index.Declare("tally", "Sums.", index.Derived("total", 0, "The sum.", func(struct{}) (int, error) { return 0, nil }))
@@ -550,6 +578,15 @@ func TestAPlacementTheCoreCannotRunIsRefused(t *testing.T) {
 		Wires: []index.Wire{{Port: "tally.total", To: "sum", Line: 5}}}
 	if _, err := host.Serve(host.Options{Root: t.TempDir(), Clock: newClock(), Wiring: w, Components: []*index.Component{tally}}); err == nil || !strings.Contains(err.Error(), "wiring line 3: instance tally is placed") {
 		t.Fatalf("a placed derivation starts with %v, and wants a refusal at its wiring line", err)
+	}
+	poller := index.Declare("poller", "Runs on each second.", index.IO(), index.Reacts(func(string, struct {
+		Second time.Time `index:"second"`
+	}) {
+	}))
+	w = index.Wiring{Instances: []index.Instance{{Name: "poller", Component: "poller", Enabled: true, Config: map[string]index.ConfigValue{}, Command: []string{"poller"}, CommandLine: 3, Line: 1}},
+		Wires: []index.Wire{{Port: "poller.second", To: index.BuiltIn, Line: 5}}}
+	if _, err := host.Serve(host.Options{Root: t.TempDir(), Clock: newClock(), Wiring: w, Components: []*index.Component{poller}}); err == nil || !strings.Contains(err.Error(), "wiring line 3: instance poller is placed") {
+		t.Fatalf("a placed reaction starts with %v, and wants a refusal at its wiring line", err)
 	}
 }
 
@@ -588,8 +625,10 @@ func TestAHookWithNoCoreFailsOpenAtOnce(t *testing.T) {
 	}
 }
 
-// looking is a wall clock that counts the looks at a start's claim (each
-// one reads Now once the claim is found) and runs first on the first of them.
+// looking is a wall clock that counts its reads: the one of the wait's end,
+// then two for each look at a start's claim (each look reads Now once the
+// claim is found, and again for the wait's end), and runs first on the
+// first look.
 type looking struct {
 	mu    sync.Mutex
 	looks int
@@ -599,8 +638,10 @@ type looking struct {
 func (l *looking) Now() time.Time {
 	l.mu.Lock()
 	l.looks++
-	first := l.first
-	l.first = nil
+	var first func()
+	if l.looks == 2 { // the first look at the claim
+		first, l.first = l.first, nil
+	}
 	l.mu.Unlock()
 	if first != nil {
 		first()
@@ -626,8 +667,8 @@ func TestAHookWaitsForAStartingCoreWithinItsWait(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	none := &looking{}
-	if _, err := host.Post(none, root, "Stop", nil, wait); !errors.Is(err, host.ErrNotRunning) || none.count() != 0 {
-		t.Fatalf("a hook with no claim answers %v after %d looks, and wants ErrNotRunning without looking", err, none.count())
+	if _, err := host.Post(none, root, "Stop", nil, wait); !errors.Is(err, host.ErrNotRunning) || none.count() != 1 {
+		t.Fatalf("a hook with no claim answers %v after %d reads of its clock, and wants ErrNotRunning after the one read of its wait's end, without looking", err, none.count())
 	}
 	if err := os.MkdirAll(filepath.Dir(host.ClaimPath(root)), 0o700); err != nil {
 		t.Fatal(err)
@@ -636,8 +677,8 @@ func TestAHookWaitsForAStartingCoreWithinItsWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	never := &looking{}
-	if _, err := host.Post(never, root, "Stop", nil, 200*time.Millisecond); !errors.Is(err, host.ErrNotRunning) || never.count() < 2 {
-		t.Fatalf("a hook whose core never comes up answers %v after %d looks, and wants ErrNotRunning once it looked again", err, never.count())
+	if _, err := host.Post(never, root, "Stop", nil, 200*time.Millisecond); !errors.Is(err, host.ErrNotRunning) || never.count() < 5 {
+		t.Fatalf("a hook whose core never comes up answers %v after %d reads of its clock, and wants ErrNotRunning once it looked again: 5 reads", err, never.count())
 	}
 	var c *host.Core
 	stands := &looking{first: func() {

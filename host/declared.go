@@ -124,8 +124,7 @@ func (r remote) Command(ctx context.Context, name string, s index.Step, say func
 		return a, fmt.Errorf("instance %s: command %q, step %d: %w", r.inst, name, s.Step, err)
 	}
 	wait := r.c.o.StepWait
-	quiet := time.NewTimer(wait)
-	defer quiet.Stop()
+	quiet := r.c.o.Clock.After(wait)
 	var live []string
 	for {
 		select {
@@ -145,10 +144,7 @@ func (r remote) Command(ctx context.Context, name string, s index.Step, say func
 					r.Stop(name, s.Call, err.Error())
 					return a, err
 				}
-				if !quiet.Stop() {
-					<-quiet.C
-				}
-				quiet.Reset(wait)
+				quiet = r.c.o.Clock.After(wait)
 				if w.Line != nil {
 					live = append(live, *w.Line)
 					if say != nil {
@@ -162,7 +158,7 @@ func (r remote) Command(ctx context.Context, name string, s index.Step, say func
 			}
 			a.Lines = live
 			return a, nil
-		case <-quiet.C:
+		case <-quiet:
 			err := fmt.Errorf("instance %s: command %q, step %d: no answer, line or beat within %v", r.inst, name, s.Step, wait)
 			r.Stop(name, s.Call, err.Error())
 			return a, err
@@ -203,7 +199,7 @@ func (r remote) Serve(ctx context.Context, verb string, req json.RawMessage) (js
 	}
 	call := fmt.Sprintf("%d", r.c.asks.Add(1))
 	data, _ := json.Marshal(map[string]any{"call": call, "request": req})
-	ctx, cancel := context.WithTimeout(ctx, VerbWait)
+	ctx, cancel := Within(ctx, r.c.o.Clock, VerbWait)
 	defer cancel()
 	subject := bus.IOVerb + bus.Subject(r.inst) + "." + bus.Token(verb)
 	m, err := r.c.nc.RequestWithContext(ctx, subject, data)
@@ -436,19 +432,17 @@ func (c *Core) running(reply, name string) (context.Context, context.CancelCause
 // which sends no abandon, ends its call within one CallBeat, inside the lease
 // lapse (docs/go-core.md "A call given up").
 func (c *Core) watchCall(reply, progress string, cancel context.CancelCauseFunc, stop <-chan struct{}) {
-	t := time.NewTicker(c.o.CallBeat)
-	defer t.Stop()
 	for {
 		select {
 		case <-stop:
 			return
 		case <-c.done:
 			return
-		case <-t.C:
+		case <-c.o.Clock.After(c.o.CallBeat):
 			if progress != "" {
 				c.progress(progress, Progress{Beat: true})
 			}
-			if reply != "" && c.bus.Unheard(reply, 0) {
+			if reply != "" && c.bus.Unheard(reply, 0, c.o.Clock.Now) {
 				cancel(ErrCallerGone)
 				return
 			}

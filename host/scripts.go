@@ -348,7 +348,7 @@ func under(base, path string) (string, bool) {
 // gitUntracked says whether git in root neither tracks nor ignores rel; known
 // is false where git cannot say (no repository, no git).
 func gitUntracked(root, rel string) (untracked, known bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), gitWait)
+	ctx, cancel := Within(context.Background(), Wall{}, gitWait)
 	defer cancel()
 	out, err := git.Run(ctx, root, "ls-files", "--others", "--exclude-standard", "--", filepath.ToSlash(rel))
 	if err != nil {

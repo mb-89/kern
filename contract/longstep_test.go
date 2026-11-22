@@ -51,7 +51,9 @@ func TestAStepAnswersAfterALongLocalPhase(t *testing.T) {
 	command, _ := json.Marshal([]string{pythonPath(t), "-m", "kern", "run", "components/gap"})
 	wiring := fmt.Sprintf("[instances.gap]\ncomponent = \"gap\"\ncommand = %s\n\n"+
 		"[instances.github]\ncomponent = \"github\"\nconfig = { backend = \"relay\" }\n\n"+
+		"[instances.clock]\ncomponent = \"clock\"\n\n"+
 		"[wires]\n\"gap.step\" = \"github.step\"\n\"github.issues\" = \"github/issues/<key>\"\n"+
+		"\"clock.time\" = \"clock/time\"\n\"clock.second\" = \"clock/second\"\n\"github.second\" = \"clock/second\"\n"+
 		"\"github.pulls\" = \"github/pulls/<key>\"\n\"github.comments\" = \"github/comments/<key>\"\n"+
 		"\"github.checks\" = \"github/checks/<key>\"\n\"github.outbox\" = \"github/outbox/<key>\"\n", command)
 	if err := os.WriteFile(filepath.Join(root, index.WiringFile), []byte(wiring), 0o600); err != nil {
