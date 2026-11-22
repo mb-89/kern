@@ -1,0 +1,5 @@
+# The request the ledger answers with its verb append: its tests meet every expectation pooled under
+# it (README.md "Expectations"), the clerk's and the Python tally's among them.
+[[claim]]
+name = "lines.append"
+verb = "append"

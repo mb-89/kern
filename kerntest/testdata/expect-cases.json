@@ -1,0 +1,34 @@
+{
+  "about": "kerntest/expect.go and python/kern/expect.py held to one reading of an expectation file (README.md \"Expectations\"): each refused file names the refusal, each match the value its expectation is written as in TOML (the key value), what is got as JSON, the exact paths, and the refusal, empty where it matches.",
+  "refused": [
+    {"file": "[[expect]]\nname = \"Numbers\"\nport = \"n\"\nvalue = 1\n", "refusal": "expect 1: name \"Numbers\" is no name"},
+    {"file": "[[expect]]\nname = \"n\"\nport = \"n\"\nrequest = \"r\"\nvalue = 1\n", "refusal": "expect 1: an expectation sets port, a value it reads, or request, a request it sends, and not both"},
+    {"file": "[[expect]]\nname = \"n\"\nport = \"n\"\n", "refusal": "expect 1: port n reads no value: set value"},
+    {"file": "[[expect]]\nname = \"n\"\nport = \"n\"\nvalue = 1\nanswer = 2\n", "refusal": "expect 1: port n reads a value: ask, answer and refused belong to a request"},
+    {"file": "[[expect]]\nname = \"n\"\nrequest = \"r\"\nanswer = 1\n", "refusal": "expect 1: request r sends nothing: set ask"},
+    {"file": "[[expect]]\nname = \"n\"\nrequest = \"r\"\nask = 1\n", "refusal": "expect 1: request r relies on an answer or on its refusal: set answer, or refused = true, and not both"},
+    {"file": "[[expect]]\nname = \"n\"\nrequest = \"r\"\nask = 1\nanswer = 1\nrefused = true\n", "refusal": "set answer, or refused = true, and not both"},
+    {"file": "[[expect]]\nname = \"n\"\nport = \"n\"\nvalue = 1\nmatch = \"like\"\n", "refusal": "expect 1: match is type or exact, not \"like\""},
+    {"file": "[[expect]]\nname = \"n\"\nport = \"n\"\nvalue = 1\nexact = [\"title\"]\n", "refusal": "expect 1: exact path \"title\" starts at value, ask or answer"},
+    {"file": "[[expect]]\nname = \"n\"\nport = \"n\"\nvalue = 1\n[[expect]]\nname = \"m\"\nport = \"n\"\nvalue = 2\n", "refusal": "expect 2: expect 1 already reads port n given \"\": one value per port and given"},
+    {"file": "[[expect]]\nname = \"n\"\nport = \"n\"\nvalue = 1\nwriter = \"source\"\n", "refusal": "no key writer"},
+    {"file": "[[claim]]\nname = \"n\"\n", "refusal": "claim 1: a claim sets port, the output it writes the name on, or verb, the verb that answers the request, and not both"},
+    {"file": "[[claim]]\nname = \"n\"\nport = \"a\"\n[[claim]]\nname = \"n\"\nport = \"b\"\n", "refusal": "claim 2: claim 1 already claims name \"n\""}
+  ],
+  "matches": [
+    {"want": "value = {number = 1, labels = [\"work\"], pushed = 3.0}", "got": {"number": 8, "title": "more keys are fine", "labels": ["ready", "work"], "pushed": 4.5}, "exact": [], "refusal": ""},
+    {"want": "value = {number = 1, labels = [\"work\"], pushed = 3.0}", "got": {"number": 8, "labels": [], "pushed": 1}, "exact": [], "refusal": "value.labels is an empty list, want at least one item"},
+    {"want": "value = {number = 1, labels = [\"work\"], pushed = 3.0}", "got": {"number": 1.5, "labels": ["w"], "pushed": 1}, "exact": [], "refusal": "value.number is 1.5, want an integer"},
+    {"want": "value = {number = 1, labels = [\"work\"], pushed = 3.0}", "got": {"labels": ["w"]}, "exact": [], "refusal": "value.number is missing"},
+    {"want": "value = {number = 1, labels = [\"work\"], pushed = 3.0}", "got": {"number": 1, "labels": [2], "pushed": 1}, "exact": [], "refusal": "item 0: value.labels[] is 2, want a string"},
+    {"want": "value = {number = 1, labels = [\"work\"], pushed = 3.0}", "got": {"number": 1, "labels": ["ready", "work"], "pushed": 1}, "exact": ["value.labels[]"], "refusal": "item 0: value.labels[] is \"ready\", want \"work\""},
+    {"want": "value = {number = 1, labels = [\"work\"], pushed = 3.0}", "got": {"number": 1, "labels": ["work"], "pushed": 4.5}, "exact": ["value.pushed"], "refusal": "value.pushed is 4.5, want 3"},
+    {"want": "value = {number = 1, labels = [\"work\"], pushed = 3.0}", "got": {"number": 2, "labels": ["work"], "pushed": 3}, "exact": ["value.labels[]", "value.pushed"], "refusal": ""},
+    {"want": "value = 3", "got": 3.0, "exact": ["value"], "refusal": ""},
+    {"want": "value = 3", "got": "3", "exact": [], "refusal": "value is \"3\", want an integer"},
+    {"want": "value = true", "got": 1, "exact": [], "refusal": "value is 1, want true or false"},
+    {"want": "value = [1, 2]", "got": [1, 2, 3], "exact": ["value"], "refusal": "value is [1,2,3], want [1,2]"},
+    {"want": "value = []", "got": [], "exact": [], "refusal": ""},
+    {"want": "value = \"x\"", "got": {"a": 1}, "exact": [], "refusal": "value is {\"a\":1}, want a string"}
+  ]
+}

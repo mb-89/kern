@@ -1,0 +1,29 @@
+# What the sample Python component's tests expect of the numbers it reads and the request its
+# tally file posts with (README.md "Expectations"). No line names the component on the other side:
+# kern's fixtures counter and ledger claim them (index/fixture/counter.expect.toml and
+# ledger.expect.toml), and index/fixture/expect_test.go checks a wiring that loads the three.
+
+[[expect]]
+name = "numbers"
+port = "numbers"
+value = []
+match = "exact"
+
+[[expect]]
+name = "numbers"
+port = "numbers"
+given = "numbers stand"
+value = [1, 2, 3]
+
+[[expect]]
+name = "lines.append"
+request = "post"
+ask = "a word"
+answer = 1
+
+[[expect]]
+name = "lines.append"
+request = "post"
+ask = ""
+exact = ["ask"]
+refused = true

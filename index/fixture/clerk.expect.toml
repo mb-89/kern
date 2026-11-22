@@ -1,0 +1,26 @@
+# What the clerk's tests expect of the request it posts each word with (README.md "Expectations").
+# No line names the component that answers it: ledger claims it, in ledger.expect.toml.
+
+# A line is answered with where it stands: some whole number.
+[[expect]]
+name = "lines.append"
+request = "post"
+ask = "a word"
+answer = 1
+
+# An empty line is refused, which stops the rest.
+[[expect]]
+name = "lines.append"
+request = "post"
+ask = ""
+exact = ["ask"]
+refused = true
+
+# Given two lines stand, the next one stands third.
+[[expect]]
+name = "lines.append"
+request = "post"
+given = "two lines stand"
+ask = "a word"
+answer = 3
+exact = ["answer"]
