@@ -27,8 +27,8 @@ import (
 // keeps its components, Go packages and declared ones alike.
 const Dir = "components"
 
-// Owner is one I/O module's forbid list and the folder its own code lies in,
-// which may use the list's entries.
+// Owner is one I/O module the checkout loads: its forbid list, which its own
+// folder's code may use, and the folders it declares it writes (index.Writes).
 type Owner struct {
 	// Module is the I/O component's name.
 	Module string
@@ -36,8 +36,15 @@ type Owner struct {
 	// where its code lies outside the checkout, such as a kern component an
 	// application's binary carries.
 	Home string
-	// List is its forbid list.
+	// List is its forbid list, empty for a module that only declares Writes.
 	List index.Forbidden
+	// Managed are the folders the list's entries are forbidden on where the
+	// list names its config key On: what the wiring's instances of the module
+	// set for that key (Manage), else the key's built-in value.
+	Managed []string
+	// Writes are the folders the module declares it writes with direct file
+	// calls; nil where it declares none.
+	Writes []string
 }
 
 // owns says whether the file at p, slash-separated under the checkout, is the
@@ -57,6 +64,9 @@ type Finding struct {
 	Kind, Entry string
 	// Owners are the I/O modules whose lists hold the entry.
 	Owners []string
+	// Notes say, for a list forbidden only on some folders (index.Forbidden.On),
+	// why the use is refused: the folder writes nothing, or writes one they manage.
+	Notes []string
 }
 
 func (f Finding) String() string {
@@ -64,6 +74,10 @@ func (f Finding) String() string {
 	module, forbids := "module "+owners, "forbids"
 	if len(f.Owners) > 1 {
 		module, forbids = "modules "+owners, "forbid"
+	}
+	if len(f.Notes) > 0 {
+		return fmt.Sprintf("%s:%d: %s uses the %s %s, which the I/O %s %s on the folders it manages: %s",
+			f.File, f.Line, f.Folder, f.Kind, f.Entry, module, forbids, strings.Join(f.Notes, "; "))
 	}
 	return fmt.Sprintf("%s:%d: %s uses the %s %s, which the I/O %s %s: only %s may use it, so reach it through %s",
 		f.File, f.Line, f.Folder, f.Kind, f.Entry, module, forbids, owners, reach(f.Owners))
@@ -78,13 +92,14 @@ func reach(owners []string) string {
 	return strings.Join(each, " or ") + " names and verbs"
 }
 
-// Load answers the owners of the forbid lists the checkout at root loads: each
-// I/O component of compiled, the components a binary carries, with its home
-// where its package lies in the checkout's Go module (go.mod at root), and
-// each I/O component declared by a component.toml under components/, its
-// folder its home. A component.toml the core would refuse is refused, naming
-// its file.
-func Load(root string, compiled []*index.Component) ([]Owner, error) {
+// Load answers the I/O modules the checkout at root loads, each with a forbid
+// list or declared written folders: each of compiled, the components a binary
+// carries, with its home where its package lies in the checkout's Go module
+// (go.mod at root), and each declared by a component.toml under components/,
+// its folder its home; the folders a list forbids its entries on are read
+// from w, the checkout's wiring (Manage). A component.toml the core would
+// refuse is refused, naming its file.
+func Load(root string, compiled []*index.Component, w index.Wiring) ([]Owner, error) {
 	module, err := modulePath(filepath.Join(root, "go.mod"))
 	if err != nil {
 		return nil, err
@@ -94,7 +109,47 @@ func Load(root string, compiled []*index.Component) ([]Owner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append(owners, declared...), nil
+	return Manage(append(owners, declared...), w), nil
+}
+
+// Manage answers owners with the folders each list with an On key is
+// forbidden on: what w's instances of its module set for that key, added to
+// the key's built-in value.
+func Manage(owners []Owner, w index.Wiring) []Owner {
+	out := append([]Owner(nil), owners...)
+	for i, o := range out {
+		if o.List.On == "" {
+			continue
+		}
+		managed := append([]string(nil), o.Managed...)
+		for _, in := range w.Instances {
+			if in.Component != o.Module {
+				continue
+			}
+			if v, ok := in.Config[o.List.On]; ok {
+				items, _ := v.Value.([]any)
+				for _, item := range items {
+					if s, ok := item.(string); ok {
+						managed = append(managed, path.Clean(filepath.ToSlash(s)))
+					}
+				}
+			}
+		}
+		out[i].Managed = managed
+	}
+	return out
+}
+
+// builtinFolders answers the built-in value of a component's config key that lists folders.
+func builtinFolders(c *index.Component, key string) []string {
+	for _, k := range c.Config() {
+		if k.Port == key {
+			if v, ok := k.Builtin.([]string); ok {
+				return append([]string(nil), v...)
+			}
+		}
+	}
+	return nil
 }
 
 // Compiled answers the owners among compiled, each I/O component with a
@@ -104,7 +159,7 @@ func Load(root string, compiled []*index.Component) ([]Owner, error) {
 func Compiled(module string, compiled []*index.Component) []Owner {
 	var out []Owner
 	for _, c := range compiled {
-		if !c.IO() || c.Forbids().Empty() {
+		if !c.IO() || (c.Forbids().Empty() && c.Writes() == nil) {
 			continue
 		}
 		home := ""
@@ -112,7 +167,7 @@ func Compiled(module string, compiled []*index.Component) []Owner {
 		if p := strings.TrimSuffix(c.Package(), "_test"); module != "" && strings.HasPrefix(p, module+"/") {
 			home = strings.TrimPrefix(p, module+"/")
 		}
-		out = append(out, Owner{Module: c.Name(), Home: home, List: c.Forbids()})
+		out = append(out, Owner{Module: c.Name(), Home: home, List: c.Forbids(), Managed: builtinFolders(c, c.Forbids().On), Writes: c.Writes()})
 	}
 	return out
 }
@@ -145,8 +200,8 @@ func Declared(fsys fs.FS) ([]Owner, error) {
 		if err != nil {
 			return fmt.Errorf("%s: %w", p, err)
 		}
-		if c.IO() && !c.Forbids().Empty() {
-			out = append(out, Owner{Module: c.Name(), Home: path.Dir(p), List: c.Forbids()})
+		if c.IO() && (!c.Forbids().Empty() || c.Writes() != nil) {
+			out = append(out, Owner{Module: c.Name(), Home: path.Dir(p), List: c.Forbids(), Managed: builtinFolders(c, c.Forbids().On), Writes: c.Writes()})
 		}
 		return nil
 	})
@@ -245,8 +300,8 @@ func Scan(fsys fs.FS, owners []Owner) ([]Finding, error) {
 		}
 		folder := componentFolder(fsys, p)
 		for _, u := range uses {
-			if names := forbidders(owners, p, u); len(names) > 0 {
-				found = append(found, Finding{File: p, Line: u.line, Folder: folder, Kind: u.kind, Entry: u.entry, Owners: names})
+			if names, notes := forbidders(owners, p, folder, u); len(names) > 0 {
+				found = append(found, Finding{File: p, Line: u.line, Folder: folder, Kind: u.kind, Entry: u.entry, Owners: names, Notes: notes})
 			}
 		}
 		return nil
@@ -261,9 +316,12 @@ func Scan(fsys fs.FS, owners []Owner) ([]Finding, error) {
 }
 
 // forbidders answers the owners whose lists hold the use's entry, sorted, or
-// none where an owner of it owns the file.
-func forbidders(owners []Owner, p string, u use) []string {
-	var names []string
+// none where an owner of it owns the file. A list forbidden only on some
+// folders passes the use in the code of a module that declares the folders it
+// writes, none of them one of those, and answers a note why it refuses one.
+func forbidders(owners []Owner, p, folder string, u use) ([]string, []string) {
+	var names, notes []string
+	writer := writerOf(owners, p)
 	for _, o := range owners {
 		for _, k := range o.List.Kinds() {
 			if strings.TrimSuffix(k.Key, "s") != u.kind {
@@ -274,14 +332,54 @@ func forbidders(owners []Owner, p string, u use) []string {
 					continue
 				}
 				if o.owns(p) {
-					return nil
+					return nil, nil
+				}
+				if o.List.On != "" {
+					note, refused := scoped(o, writer, folder)
+					if !refused {
+						continue
+					}
+					notes = append(notes, note)
 				}
 				names = append(names, o.Module)
 			}
 		}
 	}
 	sort.Strings(names)
-	return names
+	return names, notes
+}
+
+// writerOf answers the module whose folder holds the file at p and that
+// declares the folders it writes, or nil.
+func writerOf(owners []Owner, p string) *Owner {
+	for i := range owners {
+		if owners[i].Writes != nil && owners[i].owns(p) {
+			return &owners[i]
+		}
+	}
+	return nil
+}
+
+// scoped judges a use of an entry o forbids on its managed folders: it passes
+// in a writer that declares its folders where none overlaps one o manages,
+// else it is refused with a note naming why.
+func scoped(o Owner, writer *Owner, folder string) (string, bool) {
+	managed := "none yet"
+	if len(o.Managed) > 0 {
+		managed = strings.Join(o.Managed, ", ")
+	}
+	if writer == nil {
+		return fmt.Sprintf("%s declares no folders it writes, so it may write one %s manages (its config %s: %s); declare them (index.Writes, or writes in component.toml), or write through %s's verbs",
+			folder, o.Module, o.List.On, managed, o.Module), true
+	}
+	for _, w := range writer.Writes {
+		for _, m := range o.Managed {
+			if w == m || strings.HasPrefix(w, m+"/") || strings.HasPrefix(m, w+"/") {
+				return fmt.Sprintf("%s writes %s, which %s manages (its config %s: %s); write through %s's verbs", writer.Module, w, o.Module, o.List.On, managed, o.Module), true
+			}
+		}
+	}
+	return "", false
 }
 
 // componentFolder answers the folder of the component a file belongs to: the

@@ -179,6 +179,8 @@ type Component struct {
 	// package that declared the component (Package).
 	forbids *Forbidden
 	pkg     string
+	// writes are the folders it declares it writes with direct file calls (Writes).
+	writes []string
 }
 
 type reaction struct {

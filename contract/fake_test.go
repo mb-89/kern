@@ -430,6 +430,8 @@ func TestDeclarationsAreRefusedAlike(t *testing.T) {
 		Taken []struct {
 			Name, Text string
 			Forbids    map[string][]string
+			On         string
+			Writes     []string
 		} `json:"taken"`
 		Hash struct {
 			Text   string `json:"text"`
@@ -463,6 +465,9 @@ func TestDeclarationsAreRefusedAlike(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got, k.Forbids) {
 			t.Errorf("%s: forbids reads %v, and wants %v", k.Name, got, k.Forbids)
+		}
+		if c.Forbids().On != k.On || !reflect.DeepEqual(c.Writes(), k.Writes) {
+			t.Errorf("%s: on and writes read %q and %v, and want %q and %v", k.Name, c.Forbids().On, c.Writes(), k.On, k.Writes)
 		}
 	}
 	if a, b := index.Hash([]byte(v.Hash.Text)), index.Hash([]byte(v.Hash.SameAs)); a != b || !strings.HasPrefix(a, "sha256:") {

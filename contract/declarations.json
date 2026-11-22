@@ -1,5 +1,5 @@
 {
-  "about": "Declarations both readers refuse alike: index.ParseDeclaration in Go, kern.declaration.parse in Python. Each refusal is a list of the substrings its message holds; taken are declarations both read alike, with the forbid list each reads; hash pins the declaration hash of a text, its CRLF read as LF.",
+  "about": "Declarations both readers refuse alike: index.ParseDeclaration in Go, kern.declaration.parse in Python. Each refusal is a list of the substrings its message holds; taken are declarations both read alike, with the forbid list, its on and the written folders each reads; hash pins the declaration hash of a text, its CRLF read as LF.",
   "refused": [
     {"name": "another contract version", "text": "name = \"x\"\ncontract = 2\nhelp = \"h\"\n", "error": ["contract is 2", "contract = 1"]},
     {"name": "no contract", "text": "name = \"x\"\nhelp = \"h\"\n", "error": ["contract = 1"]},
@@ -20,10 +20,14 @@
     {"name": "a forbidden call without its package", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\nio = true\n[forbids]\ncalls = [\"Now\"]\n", "error": ["forbids.calls: \"Now\" is no call"]},
     {"name": "a forbidden host that is no host", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\nio = true\n[forbids]\nhosts = [\"https://api.github.com\"]\n", "error": ["forbids.hosts: \"https://api.github.com\" is no host"]},
     {"name": "a forbid list of no strings", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\nio = true\n[forbids]\ncommands = \"gh\"\n", "error": ["forbids.commands is a list of strings"]},
-    {"name": "a forbid list that names nothing", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\nio = true\n[forbids]\n", "error": ["forbids names nothing"]}
+    {"name": "a forbid list that names nothing", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\nio = true\n[forbids]\n", "error": ["forbids names nothing"]},
+    {"name": "a forbid list on a config key the component lacks", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\nio = true\n[forbids]\ncalls = [\"os.WriteFile\"]\non = \"folders\"\n", "error": ["forbids.on: \"folders\" is no config key"]},
+    {"name": "written folders without the I/O flag", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\nwrites = [\".se/x\"]\n", "error": ["component x declares the folders it writes but carries no I/O flag"]},
+    {"name": "a written folder that climbs out", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\nio = true\nwrites = [\"../x\"]\n", "error": ["writes: \"../x\" is no folder relative to the checkout"]}
   ],
   "taken": [
-    {"name": "an I/O component's forbid list", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\nio = true\n[forbids]\ncalls = [\"time.Now\", \"time.sleep\"]\ncommands = [\"gh\"]\nhosts = [\"api.github.com\"]\nimports = [\"github.com/google/go-github\"]\n", "forbids": {"calls": ["time.Now", "time.sleep"], "imports": ["github.com/google/go-github"], "commands": ["gh"], "hosts": ["api.github.com"]}}
+    {"name": "an I/O component's forbid list", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\nio = true\n[forbids]\ncalls = [\"time.Now\", \"time.sleep\"]\ncommands = [\"gh\"]\nhosts = [\"api.github.com\"]\nimports = [\"github.com/google/go-github\"]\n", "forbids": {"calls": ["time.Now", "time.sleep"], "imports": ["github.com/google/go-github"], "commands": ["gh"], "hosts": ["api.github.com"]}},
+    {"name": "a forbid list on the folders a config key names, and the folders a component writes", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\nio = true\nwrites = [\".se/x\"]\n[config.folders]\ntype = \"[string]\"\nbuiltin = []\nhelp = \"f\"\n[forbids]\ncalls = [\"os.WriteFile\"]\non = \"folders\"\n", "forbids": {"calls": ["os.WriteFile"]}, "on": "folders", "writes": [".se/x"]}
   ],
   "hash": {"text": "name = \"x\"\r\ncontract = 1\r\n", "same_as": "name = \"x\"\ncontract = 1\n"}
 }

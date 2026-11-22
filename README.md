@@ -458,6 +458,7 @@ calls = ["time.Now", "time.sleep"]           # Go's <import path>.<name>, Python
 imports = ["github.com/google/go-github"]    # a package, and every one below it
 commands = ["gh"]                            # a program run by name, named in a string
 hosts = ["api.github.com"]                   # a host named in a string
+on = "folders"                               # optional: forbidden only on the folders this config key names
 ```
 
 - **Declared.** A Go component declares it with `index.Forbids(index.Forbidden{...})`, a
@@ -465,13 +466,24 @@ hosts = ["api.github.com"]                   # a host named in a string
   without the I/O flag, an entry of no kind's form, an entry named twice and a list that names
   nothing (`contract/declarations.json`). The clock forbids reading and waiting on the system
   time ([its README](components/clock/README.md)), the GitHub component `gh`, the REST API's host
-  and the Go clients of GitHub ([its README](components/github/README.md)).
+  and the Go clients of GitHub ([its README](components/github/README.md)), and the files module
+  direct file writes on the folders it manages ([its README](components/files/README.md)).
+- **A list on some folders.** A list whose `on` names a config key of its module (a list of
+  strings, the files module's `folders`) forbids its entries only on the folders that key names
+  in the checkout's wiring (`wiring.toml` and its overlay), and its built-in value. Another
+  component may use one where it declares the folders it writes, `index.Writes(...)` in Go or
+  `writes = [...]` at the top of its `component.toml`, an I/O component's alone, and none of them
+  is, holds or lies in a managed folder; one that declares none is refused, since it may write
+  one. The session record declares `.se/.runtime/sessions`, so its writes pass until a wiring
+  manages that folder.
 - **The scan** (`forbid/`) reads the Go and Python files under `components/`, but tests
   (`*_test.go`, `test_*.py`, `*_test.py`, `conftest.py`) and the folders `testdata`, `tests` and
   hidden ones. In Go it reads each import, each selector of an imported package under any import
   name, and each string literal; in Python each import, each dotted name with the names an import
   binds read as what they stand for (`from datetime import datetime as dt` makes `dt.now`
   `datetime.datetime.now`, which `datetime.now` names), and each string. A comment names nothing.
+  A method of a value, such as `p.write_text` on a path in a variable, is no dotted name of an
+  import, so only `Path.write_text` itself is caught.
   A command is used by a string that is its name or a command line starting with it, a host by a
   string that holds it between characters no host name holds.
 - **Whose code may use an entry.** The owner's own folder: a Go component's is the folder of the

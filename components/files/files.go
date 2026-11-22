@@ -58,11 +58,12 @@ const MaxMatches = 1000
 // stays under the bus's cap (quackitect v5 src/modules/files/watch.go).
 const seedBatch = 8 << 20
 
-// Forbids is the files module's forbid list (kern#18): the direct file
-// writes that only it may make on a managed folder, Go's and Python's. Since
-// the folders are a setting, another component's use of one is a write past
-// the model wherever it reaches a managed folder; kern#18's check reads the
-// list once it lands.
+// Forbids is the files module's forbid list (index.Forbids): the direct file
+// writes that only it may make on a managed folder, Go's and Python's. They
+// are forbidden on the folders its config folders names (index.Forbidden.On):
+// another component may make them where it declares the folders it writes
+// (index.Writes) and none is a managed one, as `kern forbids` checks against
+// the checkout's wiring (README.md "Forbid lists").
 var Forbids = []string{
 	"os.WriteFile", "os.Create", "os.CreateTemp", "os.OpenFile", "os.Rename", "os.Remove", "os.RemoveAll",
 	"os.Mkdir", "os.MkdirAll", "os.Truncate", "os.Chmod", "os.Symlink", "os.Link",
@@ -188,7 +189,7 @@ func New(o Options) *Files {
 	}
 	f := &Files{o: o, model: map[string]File{}}
 	f.Component = index.Declare(Name, "Holds the managed folders in memory: reads and searches answer from the model, and a write names the version it read.",
-		index.IO(), modelOut, watchingOut,
+		index.IO(), index.Forbids(index.Forbidden{Calls: Forbids, On: "folders"}), modelOut, watchingOut,
 		index.Config("folders", []string{}, "The managed folders, relative to the checkout's root: each must stand at the start."),
 		index.Config("content-limit", ContentLimit, "The largest file, in bytes, whose content the model holds; a larger one is held by its hash alone."),
 		index.Config("cookie-wait", CookieWait, "How long the watcher has to report the cookie the start writes in each managed folder; one it misses marks the model unwatched, and reads read the disk."),

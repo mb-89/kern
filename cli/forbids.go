@@ -30,11 +30,16 @@ func runForbids(c *Call) int {
 }
 
 // Forbids scans the checkout at root against the forbid lists of compiled and
-// of the components declared there, as `<name> forbids` does, and answers its
+// of the components declared there, a list forbidden only on some folders on
+// those the checkout's wiring names (Wiring), as `<name> forbids` does, and answers its
 // exit code: 1 where a component uses an entry of another I/O module's list,
 // each use a line on stderr, else 0 with one line on stdout.
 func Forbids(root string, compiled []*index.Component, stdout, stderr io.Writer) (int, error) {
-	owners, err := forbid.Load(root, compiled)
+	w, err := Wiring(root)
+	if err != nil {
+		return 2, err
+	}
+	owners, err := forbid.Load(root, compiled, w)
 	if err != nil {
 		return 2, err
 	}
@@ -44,7 +49,9 @@ func Forbids(root string, compiled []*index.Component, stdout, stderr io.Writer)
 	}
 	var names []string
 	for _, o := range owners {
-		names = append(names, o.Module)
+		if !o.List.Empty() {
+			names = append(names, o.Module)
+		}
 	}
 	sort.Strings(names)
 	if len(found) > 0 {

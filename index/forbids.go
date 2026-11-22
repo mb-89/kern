@@ -1,6 +1,7 @@
 package index
 
 import (
+	"reflect"
 	"regexp"
 	"runtime"
 	"strings"
@@ -22,6 +23,12 @@ type Forbidden struct {
 	Commands []string
 	// Hosts are hosts named in a string: api.github.com.
 	Hosts []string
+	// On, where set, is the config key of the I/O component whose value names
+	// the folders the entries are forbidden on, such as the files module's
+	// folders: another component may use an entry where it declares the
+	// folders it writes (Writes) and none of them is one of those. Empty, the
+	// entries are forbidden everywhere.
+	On string
 }
 
 // Empty says whether the list names nothing.
@@ -91,6 +98,26 @@ func (p forbidsPart) declare(c *Component) {
 // without the I/O flag that declares one is refused.
 func Forbids(f Forbidden) Part { return forbidsPart{f} }
 
+// writesPart declares the folders a component writes with direct file calls.
+type writesPart struct{ folders []string }
+
+func (p writesPart) declare(c *Component) {
+	if c.writes != nil {
+		c.fail("writes is declared twice")
+		return
+	}
+	c.writes = append([]string{}, p.folders...)
+}
+
+// Writes declares the folders, relative to the checkout and slash-separated,
+// an I/O component writes with direct file calls, such as the session
+// record's .se/.runtime/sessions: an entry a forbid list forbids only on some
+// folders (Forbidden.On) passes in its code while none of them is one.
+func Writes(folders ...string) Part { return writesPart{folders} }
+
+// Writes answers the folders the component declares it writes, or none.
+func (c *Component) Writes() []string { return append([]string(nil), c.writes...) }
+
 // Forbids answers the component's forbid list, empty where it declares none.
 func (c *Component) Forbids() Forbidden {
 	if c.forbids == nil {
@@ -107,6 +134,19 @@ func (c *Component) Package() string { return c.pkg }
 // checkForbids refuses a forbid list on a component without the I/O flag, and
 // a broken entry.
 func (c *Component) checkForbids() {
+	if c.writes != nil {
+		switch {
+		case !c.io:
+			c.fail("component %s declares the folders it writes but carries no I/O flag: a component that writes files reaches the outside", c.name)
+		case len(c.writes) == 0:
+			c.fail("writes names no folder")
+		}
+		for _, f := range c.writes {
+			if !writtenFolder(f) {
+				c.fail("writes: %s is no folder relative to the checkout, slash-separated, such as .se/.runtime/sessions", quote(f))
+			}
+		}
+	}
 	if c.forbids == nil {
 		return
 	}
@@ -117,6 +157,25 @@ func (c *Component) checkForbids() {
 	for _, p := range c.forbids.problems() {
 		c.fail("%s", p)
 	}
+	if on := c.forbids.On; on != "" {
+		if k, ok := c.config[on]; !ok || k.Type != reflect.TypeFor[[]string]() {
+			c.fail("forbids.on: %s is no config key of the component's that lists folders: declare it as a list of strings", quote(on))
+		}
+	}
+}
+
+// writtenFolder says whether f is a folder relative to the checkout,
+// slash-separated, that climbs out of it nowhere.
+func writtenFolder(f string) bool {
+	if f == "" || strings.HasPrefix(f, "/") || strings.Contains(f, "\\") || strings.Contains(f, ":") {
+		return false
+	}
+	for _, seg := range strings.Split(f, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 // callerPackage answers the import path of the package whose function is skip

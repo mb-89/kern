@@ -24,6 +24,11 @@ func TestAForbidListIsAnIOComponentsAlone(t *testing.T) {
 	if got := door.Package(); got != "kern/index_test" {
 		t.Fatalf("the component is declared by %q, and wants kern/index_test", got)
 	}
+	scoped := index.Declare("disk", "Holds folders.", index.IO(), index.Config("folders", []string{}, "The folders."),
+		index.Forbids(index.Forbidden{Calls: []string{"os.WriteFile"}, On: "folders"}), index.Writes(".se/disk"))
+	if err := scoped.Err(); err != nil || scoped.Forbids().On != "folders" || !reflect.DeepEqual(scoped.Writes(), []string{".se/disk"}) {
+		t.Fatalf("a list on a config key's folders, and written folders, read %v, %q, %v", err, scoped.Forbids().On, scoped.Writes())
+	}
 	if !index.Declare("plain", "Computes.").Forbids().Empty() {
 		t.Fatal("a component without a forbid list reads one")
 	}
@@ -38,6 +43,12 @@ func TestAForbidListIsAnIOComponentsAlone(t *testing.T) {
 		{"bare", []index.Part{index.IO(), index.Forbids(index.Forbidden{Calls: []string{"Now"}})}, `forbids.calls: "Now" is no call`},
 		{"url", []index.Part{index.IO(), index.Forbids(index.Forbidden{Hosts: []string{"https://api.github.com"}})}, `forbids.hosts: "https://api.github.com" is no host`},
 		{"double", []index.Part{index.IO(), index.Forbids(index.Forbidden{Commands: []string{"gh", "gh"}})}, `forbids.commands: "gh" is named twice`},
+		{"unscoped", []index.Part{index.IO(), index.Forbids(index.Forbidden{Calls: []string{"os.WriteFile"}, On: "folders"})}, `forbids.on: "folders" is no config key`},
+		{"scalar", []index.Part{index.IO(), index.Config("folders", "docs", "f"), index.Forbids(index.Forbidden{Calls: []string{"os.WriteFile"}, On: "folders"})}, `forbids.on: "folders" is no config key`},
+		{"pure", []index.Part{index.Writes(".se/x")}, "component pure declares the folders it writes but carries no I/O flag"},
+		{"climber", []index.Part{index.IO(), index.Writes("../x")}, `writes: "../x" is no folder relative to the checkout`},
+		{"rooted", []index.Part{index.IO(), index.Writes("/tmp/x")}, `writes: "/tmp/x" is no folder relative to the checkout`},
+		{"nowhere", []index.Part{index.IO(), index.Writes()}, "writes names no folder"},
 	} {
 		err := index.Declare(c.name, "A component.", c.parts...).Err()
 		if err == nil || !strings.Contains(err.Error(), c.want) {

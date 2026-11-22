@@ -101,3 +101,41 @@ func TestACompiledOwnerLivesInItsPackagesFolder(t *testing.T) {
 		t.Fatalf("in another module the owners are %+v, and want door with no home", got)
 	}
 }
+
+// A list forbidden only on the folders an owner's config names passes a use
+// in a module that declares the folders it writes, none of them managed, and
+// refuses one that declares none or writes a managed folder, naming why; the
+// managed folders are what the wiring sets for the key.
+func TestAListOnManagedFoldersPassesAWriterOfItsOwnFolder(t *testing.T) {
+	t.Parallel()
+	w, err := index.ParseWiring([]byte("[instances.files]\ncomponent = \"files\"\nconfig = { folders = [\"docs\", \"notes/\"] }\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	owners := forbid.Manage([]forbid.Owner{
+		{Module: "files", Home: "components/files", List: index.Forbidden{Calls: []string{"os.WriteFile"}, On: "folders"}},
+		{Module: "record", Home: "components/record", Writes: []string{".se/record"}},
+		{Module: "notes", Home: "components/notes", Writes: []string{"notes/inbox"}},
+	}, w)
+	if got := owners[0].Managed; strings.Join(got, ",") != "docs,notes" {
+		t.Fatalf("files manages %v, and wants docs and notes", got)
+	}
+	write := []byte("package x\n\nimport \"os\"\n\nvar _ = os.WriteFile\n")
+	fsys := fstest.MapFS{
+		"components/files/files.go":   {Data: write},
+		"components/record/record.go": {Data: write},
+		"components/notes/notes.go":   {Data: write},
+		"components/loose/loose.go":   {Data: write},
+	}
+	found, err := forbid.Scan(fsys, owners)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"components/loose/loose.go:5: components/loose uses the call os.WriteFile, which the I/O module files forbids on the folders it manages: components/loose declares no folders it writes, so it may write one files manages (its config folders: docs, notes); declare them (index.Writes, or writes in component.toml), or write through files's verbs",
+		"components/notes/notes.go:5: components/notes uses the call os.WriteFile, which the I/O module files forbids on the folders it manages: notes writes notes/inbox, which files manages (its config folders: docs, notes); write through files's verbs",
+	}
+	if got := lines(found); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("the scan finds\n  %s\nand wants\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
+	}
+}

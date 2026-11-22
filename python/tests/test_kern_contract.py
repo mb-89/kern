@@ -115,7 +115,9 @@ def test_declarations_are_refused_as_go_refuses_them() -> None:
         for s in r["error"]:
             assert s in str(e.value), r["name"]
     for k in v["taken"]:
-        assert declaration.parse(k["text"].encode()).forbids == k["forbids"], k["name"]
+        d = declaration.parse(k["text"].encode())
+        assert d.forbids == k["forbids"], k["name"]
+        assert (d.forbids_on, d.writes) == (k.get("on", ""), k.get("writes")), k["name"]
     h = v["hash"]
     assert declaration.digest(h["text"].encode()) == declaration.digest(h["same_as"].encode())
     assert declaration.digest(b"").startswith("sha256:")

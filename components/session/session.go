@@ -74,7 +74,7 @@ func New(o Options) *Session {
 	}
 	s := &Session{o: o, max: map[string]int64{}}
 	s.Component = index.Declare(Name, "Appends every event the host hands the core, one JSON line each, to a file per session under "+Dir+".",
-		index.IO(),
+		index.IO(), index.Writes(Dir),
 		index.Config("max-bytes", MaxBytes, "The size a session file may reach: a line that would take it past is written short, without its payload."),
 		index.Config("keep", Keep, "How many session files the start keeps, the newest by modification time; it removes the others."),
 		index.Inlet(s.start),
