@@ -318,3 +318,22 @@ func TestASearchInDoubtPassesToTheDisk(t *testing.T) {
 		t.Errorf("a Glob over an unwatched model answers %q, and wants it to pass", reason)
 	}
 }
+
+// A path that reaches the root through a symbolic link is the same path: a
+// write to a managed file named through a linked folder is refused too.
+func TestAWriteThroughALinkedRootIsRefused(t *testing.T) {
+	t.Parallel()
+	real := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(real, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("no symbolic link here: %v", err)
+	}
+	s := started(t, real, map[string]any{"folders": []string{"docs"}})
+	through := filepath.Join(link, "docs", "new.md")
+	if reason := s.files.Component.Guard("files", host.PreToolUse, claudeCall("Write", map[string]any{"file_path": through}, link)); !strings.Contains(reason, "docs/new.md") {
+		t.Fatalf("a Write of a new managed file through a linked root answers %q, and wants it refused", reason)
+	}
+}

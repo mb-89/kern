@@ -71,24 +71,47 @@ func (f *Files) holdsManaged(rel string) bool {
 }
 
 // relOfAny answers abs relative to the root, as relOf does, also where the
-// root or the path reaches it through a symbolic link, as macOS's temporary
-// folders do.
+// root or the path reaches it through a symbolic link or another spelling of
+// a folder, as macOS's temporary folders do: both sides are tried with their
+// links resolved.
 func (f *Files) relOfAny(abs string) (string, bool) {
 	if rel, ok := f.relOf(abs); ok {
 		return rel, true
 	}
-	if f.real == "" {
-		return "", false
+	real := resolved(abs)
+	for _, root := range []string{f.root, f.real} {
+		if root == "" {
+			continue
+		}
+		for _, p := range []string{abs, real} {
+			rel, err := filepath.Rel(root, p)
+			if err != nil {
+				continue
+			}
+			rel = filepath.ToSlash(rel)
+			if rel != "." && rel != ".." && !strings.HasPrefix(rel, "../") {
+				return rel, true
+			}
+		}
 	}
-	rel, err := filepath.Rel(f.real, abs)
-	if err != nil {
-		return "", false
+	return "", false
+}
+
+// resolved answers p with the links of its longest standing prefix resolved,
+// the rest of it joined as it is: a file a write is about to make does not
+// stand yet.
+func resolved(p string) string {
+	rest := ""
+	for dir := filepath.Clean(p); ; dir = filepath.Dir(dir) {
+		if real, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(real, rest)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return p
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
 	}
-	rel = filepath.ToSlash(rel)
-	if rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
-		return "", false
-	}
-	return rel, true
 }
 
 // writeRemedy is the refusal of a call that writes managed files: what it
