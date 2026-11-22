@@ -545,3 +545,64 @@ func TestARestoredBootTellsNoStaleDeadCore(t *testing.T) {
 		t.Fatalf("the core's log has the start lines %q, and wants one of boot-a, then one of boot-b", starts)
 	}
 }
+
+// The lean routing through the built binary and the real core (README.md
+// "Agent tools"): `kern hook` denies a write to a managed file in the shape
+// each host reads, with exit code 2 and the reason on stderr, naming the files
+// module's tools; a write elsewhere passes with nothing printed and exit 0.
+func TestAHookDeniesAWriteToAManagedFileInEachHostsFormat(t *testing.T) {
+	t.Parallel()
+	root := checkout(t)
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wiring := "[instances.files]\ncomponent = \"files\"\nconfig = { folders = [\"docs\"] }\n"
+	if err := os.WriteFile(filepath.Join(root, "wiring.toml"), []byte(wiring), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want(t, run(t, nil, "start", "--root", root), 0, "kern: started")
+	want(t, run(t, nil, "status", "--root", root, "--wait", wait), 0, "kern: running")
+	hook := func(event, payload string) (stdout, stderr string, code int) {
+		t.Helper()
+		cmd := exec.Command(kern, "hook", event, "--root", root, "--wait", wait)
+		cmd.Stdin = strings.NewReader(payload)
+		var out, errs bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &out, &errs
+		err := cmd.Run()
+		if ee, ok := err.(*exec.ExitError); ok {
+			code = ee.ExitCode()
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		return out.String(), errs.String(), code
+	}
+	abs, _ := json.Marshal(filepath.Join(root, "docs", "a.md"))
+	cwd, _ := json.Marshal(root)
+	out, errs, code := hook("PreToolUse", `{"session_id":"s1","tool_name":"Write","tool_input":{"file_path":`+string(abs)+`,"content":"x"},"cwd":`+string(cwd)+`}`)
+	var claude struct {
+		Specific struct {
+			Decision string `json:"permissionDecision"`
+			Reason   string `json:"permissionDecisionReason"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal([]byte(out), &claude); err != nil || code != 2 || claude.Specific.Decision != "deny" ||
+		!strings.Contains(claude.Specific.Reason, "docs/a.md") || !strings.Contains(claude.Specific.Reason, "files_write") || !strings.Contains(errs, "files_write") {
+		t.Fatalf("Claude Code's Write of a managed file prints %q, %q with exit code %d, and wants its deny with the remedy and 2", out, errs, code)
+	}
+	args, _ := json.Marshal(`{"path":"docs/a.md","file_text":"x"}`)
+	out, _, code = hook("preToolUse", `{"sessionId":"s1","timestamp":1,"cwd":`+string(cwd)+`,"toolName":"create","toolArgs":`+string(args)+`}`)
+	var copilot struct {
+		Decision string `json:"permissionDecision"`
+		Reason   string `json:"permissionDecisionReason"`
+	}
+	if err := json.Unmarshal([]byte(out), &copilot); err != nil || code != 2 || copilot.Decision != "deny" || !strings.Contains(copilot.Reason, "files read") {
+		t.Fatalf("the Copilot CLI's create of a managed file prints %q with exit code %d, and wants its top-level deny and 2", out, code)
+	}
+	elsewhere, _ := json.Marshal(filepath.Join(root, "notes.md"))
+	if out, _, code := hook("PreToolUse", `{"session_id":"s1","tool_name":"Write","tool_input":{"file_path":`+string(elsewhere)+`},"cwd":`+string(cwd)+`}`); out != "" || code != 0 {
+		t.Fatalf("a Write outside the managed folders prints %q with exit code %d, and wants nothing with 0", out, code)
+	}
+	if out, _, code := hook("preToolUse", `{"sessionId":"s1","cwd":`+string(cwd)+`,"toolName":"bash","toolArgs":"{\"command\":\"echo x > notes.md\"}"}`); out != "" || code != 0 {
+		t.Fatalf("a Copilot bash write outside the managed folders prints %q with exit code %d, and wants nothing with 0", out, code)
+	}
+}

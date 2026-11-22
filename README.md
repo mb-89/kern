@@ -262,6 +262,27 @@ host the person uses runs before a tool, never a path only one host has.
 > Just understand that we're not only using Claude Code. We're also using Copilot, and the hooks
 > need to. We can't use hooks of which we know that they only work in Claude Code in general.
 
+### What is refused
+
+Only a write to a managed file ([Files](#files)): the files component guards `PreToolUse`
+(`index.Guards`, [its README](components/files/README.md#the-guard)) and denies a call that writes
+one, naming the files and its tools `files` and `files_write` (`files read`, then `files edit`,
+`files write` or `files remove`, each naming the version read). What a call writes is
+`host.ToolCall.Writes`:
+
+- **File tools:** Claude Code's Write, Edit, MultiEdit and NotebookEdit; the Copilot CLI's
+  `create`, `edit`, `str_replace_editor` (but its `view`) and `apply_patch`, each mapped onto its
+  Claude name (`host.CopilotTools`).
+- **Shell commands** (Bash; the Copilot CLI's `bash` and `powershell`), parsed, never run or
+  blocked whole (`host.ShellWrites`): output redirections, `tee`, `cp`, `mv`, `install`, `ln`,
+  `rm`, `unlink`, `touch`, `truncate`, `shred`, `dd of=`, `sed -i`, `perl -i` and PowerShell's
+  content and item cmdlets, each target resolved against the call's working directory and any `cd`
+  before it. A target the parser cannot be sure of, a variable, a glob or a command substitution,
+  is no write, and a script that writes from inside (`python -c`) is not seen: the lean routing
+  refuses only what it knows, and the watcher and compare-and-swap keep the model right past it.
+- **Everything else passes:** reads, files outside the managed folders, kern's own folder `.se/`,
+  every event but `PreToolUse`, and every call while no files instance runs.
+
 ### How each host receives the deny
 
 `kern hook PreToolUse` (or `preToolUse`) reads the host's payload through `host.ParseToolCall`,

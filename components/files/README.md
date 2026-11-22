@@ -71,6 +71,31 @@ config = { folders = ["docs", "notes"] }
 - **A path outside every managed folder** is refused, naming the folders: the module does not
   reach it, and its caller reads and writes it on the disk.
 
+## Commands and the door
+
+The module serves its verbs to an agent through four commands, whose request ports are bound to its
+own verbs (`index.RequestPort.Self`), so the [MCP door](../../README.md#the-mcp-door) serves them as
+the tools `files` (reads) and `files_write` (writes), named after the instance:
+
+| command | tool | what |
+|---|---|---|
+| `files read --path PATH` | `files` | the file from the model: its first line `PATH at version <hash> (<n> bytes):`, the rest its content |
+| `files edit --path PATH --version V --old TEXT --new TEXT [--all]` | `files_write` | replaces `--old`, which must occur once (or each, with `--all`), in the file standing at version V; a missing or repeated text is refused |
+| `files write --path PATH --version V --content TEXT` | `files_write` | writes the whole file; `--version ""` for a new one |
+| `files remove --path PATH --version V` | `files_write` | removes the file |
+
+Each write names the version `files read` answered and is refused, naming re-read, where the file
+changed since, as the verbs are.
+
+## The guard
+
+The module guards the host's `PreToolUse` (`index.Guards`): a tool call that writes a managed file,
+or a managed folder or one that holds one, is denied, and its reason names the files it writes,
+the managed folders and the tools above, `files read` first; every other call passes. What a call
+writes is `host.ToolCall.Writes`, from Claude Code's and the Copilot CLI's tools and a parsed shell
+command ([kern's README "Agent tools"](../../README.md#agent-tools)). Writes into kern's own folder
+`.se/` always pass, and without a started instance nothing is refused.
+
 ## In step with the disk
 
 Reused from quackitect v4 (`src/engine/indexwatch.go`) and v5 (`src/modules/files/watch.go`):
@@ -111,7 +136,12 @@ a temporary folder, so no case waits for the disk to be noticed. Each case prove
 - a write that names an old version is refused, naming re-read, also before the watcher reported
   the hand edit;
 - an overflow reconciles what the watcher missed;
-- a deaf watcher reads the disk.
+- a deaf watcher reads the disk;
+- a write to a managed file is refused, in both hosts' formats, by Write, Edit and a parsed shell
+  command, naming the tools, and a write elsewhere, a read, `.se/` and another event pass
+  (`route_test.go`);
+- the door's commands read, edit, write and remove through the model, refuse a stale version, and
+  the door serves them as `files` and `files_write`.
 
 One case starts the module on a wiring with the operating system's watcher, and a hand edit on the
 real disk reaches its name. Its outside thing is the disk, so the normal suite's run against a

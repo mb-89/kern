@@ -161,6 +161,7 @@ type Files struct {
 	mu       sync.Mutex
 	instance string
 	root     string
+	real     string   // root with its symbolic links resolved, "" where it is root
 	folders  []string // slash-separated, relative to root
 	limit    int
 	commit   index.Commit
@@ -187,8 +188,7 @@ func New(o Options) *Files {
 		o.Watch = OpenWatcher
 	}
 	f := &Files{o: o, model: map[string]File{}}
-	f.Component = index.Declare(Name, "Holds the managed folders in memory: reads and searches answer from the model, and a write names the version it read.",
-		index.IO(), modelOut, watchingOut,
+	parts := []index.Part{index.IO(), modelOut, watchingOut,
 		index.Config("folders", []string{}, "The managed folders, relative to the checkout's root: each must stand at the start."),
 		index.Config("content-limit", ContentLimit, "The largest file, in bytes, whose content the model holds; a larger one is held by its hash alone."),
 		index.Config("cookie-wait", CookieWait, "How long the watcher has to report the cookie the start writes in each managed folder; one it misses marks the model unwatched, and reads read the disk."),
@@ -198,7 +198,10 @@ func New(o Options) *Files {
 		index.Verb("search", "Searches the held files under a folder for a Go regular expression, line by line, from the model.", f.search),
 		index.Verb("write", "Writes one managed file through the model, naming the version it read (\"\" for a new file); a file changed since is refused, naming re-read.", f.write),
 		index.Verb("remove", "Removes one managed file, naming the version it read; a file changed since is refused, naming re-read.", f.remove),
-	)
+		index.Guards(f.guard),
+	}
+	f.Component = index.Declare(Name, "Holds the managed folders in memory: reads and searches answer from the model, and a write names the version it read.",
+		append(parts, f.doorParts()...)...)
 	return f
 }
 
@@ -249,6 +252,9 @@ func (f *Files) start(instance string, read index.Reader, commit index.Commit) e
 		return fmt.Errorf("files: the watcher cannot open: %w", err)
 	}
 	f.instance, f.root, f.folders, f.limit, f.commit, f.w = instance, root, clean, limit, commit, w
+	if real, err := filepath.EvalSymlinks(root); err == nil && real != root {
+		f.real = real
+	}
 	f.done, f.ended = make(chan struct{}), make(chan struct{})
 	for _, folder := range clean {
 		if err := f.watchTree(f.abs(folder)); err != nil {
