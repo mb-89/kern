@@ -62,6 +62,14 @@ class Expectation:
     answer: Any = None
     refused: bool = False
     exact: list[str] = field(default_factory=list)
+    #: Set where the pool's base holds no expectation with these terms in the reader's file (``kern.pool``);
+    #: no file sets it.
+    new: bool = field(default=False, compare=False)
+
+    def terms(self) -> str:
+        """The expectation's terms, wherever it stands in its file: what the base must hold for it to have landed."""
+        return json.dumps([self.name, self.port, self.request, self.given, self.value, self.ask, self.answer,
+                           self.refused, self.exact], sort_keys=True, default=str)
 
     def __str__(self) -> str:
         s = f"expect {self.n} ("

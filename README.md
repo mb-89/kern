@@ -331,6 +331,9 @@ person's decision of 22 Nov (deck "Who provides the fakes", option B), after Pac
   logs. A landed expectation it does not meet fails it as `unmet`, as before.
 - **The reader's check** refuses the change with the same line, naming the claimer that must meet
   it. Once the claimer meets it, the two land and the expectation is an ordinary one.
+- **In Python**, `kern.pool.read_pool(files..., base=...)`, `Module(...).meet(pool)`, which answers
+  the pending ones, and `kern.pool.check(wiring, modules..., base=...)` are the same, with
+  `kern.pool.git_base(ref)` the base `KERN_EXPECT_BASE` names.
 - **The requests.** `go run ./tools/expect pending [--base origin/main]` runs kern's tests against
   the base, each pending line appended to the file `KERN_PENDING` names, and lists the pending
   expectations per claimer, so an integrator turns them into requests for that module. Its design
