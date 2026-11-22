@@ -33,6 +33,16 @@ component = "clock"
 "<component>.second" = "clock/second"
 ```
 
+## Its forbid list
+
+The clock forbids every other component reading or waiting on the system time (`clock.Forbidden`,
+kern's README "Forbid lists"): in Go `time.Now`, `time.Since`, `time.Until`, `time.Sleep`,
+`time.After`, `time.Tick`, `time.NewTicker`, `time.NewTimer` and `time.AfterFunc`; in Python
+`time.time`, `time.time_ns`, `time.sleep`, `time.monotonic`, `time.monotonic_ns`,
+`time.perf_counter`, `datetime.now`, `datetime.utcnow`, `datetime.today` and `date.today`. Only
+its own folder may use them; the host's clock (`host.Wall`) is the one other reader, and a
+component that stamps a time, as the session record does, reads it there.
+
 ## A component that acts on time
 
 - **It reads a counter.** It declares `index.Reacts` with an input struct that reads it (`Second

@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"kern/host"
 	"kern/index"
 )
 
@@ -45,7 +46,9 @@ const (
 type Options struct {
 	// Dir is the folder the session files lie in; Dir (the constant) where empty.
 	Dir string
-	// Now is the clock each line's time comes from.
+	// Now is the clock each line's time comes from: the host's (host.Wall)
+	// where none is given, as the clock's forbid list leaves no component
+	// another reader of the system time (README.md "Forbid lists").
 	Now func() time.Time
 }
 
@@ -67,11 +70,11 @@ func New(o Options) *Session {
 		o.Dir = Dir
 	}
 	if o.Now == nil {
-		o.Now = time.Now
+		o.Now = host.Wall{}.Now
 	}
 	s := &Session{o: o, max: map[string]int64{}}
 	s.Component = index.Declare(Name, "Appends every event the host hands the core, one JSON line each, to a file per session under "+Dir+".",
-		index.IO(),
+		index.IO(), index.Writes(Dir),
 		index.Config("max-bytes", MaxBytes, "The size a session file may reach: a line that would take it past is written short, without its payload."),
 		index.Config("keep", Keep, "How many session files the start keeps, the newest by modification time; it removes the others."),
 		index.Inlet(s.start),

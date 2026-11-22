@@ -5,6 +5,10 @@ each, to a file per session. It is off by default: the `kern` and `se` binaries 
 runs only where a wiring holds an enabled instance of it. It declares no output, verb or command,
 so nothing reads the record over the bus and no tool prints it.
 
+It writes its files directly, past the files module, and so declares the folder it writes,
+`index.Writes(".se/.runtime/sessions")`: the files module's forbid list passes its writes there
+until a wiring manages that folder (kern's README "Forbid lists").
+
 ## The switch
 
 One entry in the checkout's ignored overlay, `.se/wiring.toml`, then a restart of the core:

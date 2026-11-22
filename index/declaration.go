@@ -152,6 +152,10 @@ func ReadDeclaration(path string) (*Component, error) {
 //	type = "string"; answer = "int"; help = "..."
 //	[verbs.append]                         # an I/O component's
 //	type = "string"; answer = "int"; help = "..."
+//	[forbids]                              # an I/O component's: what only it may use (Forbids)
+//	calls = ["time.Now"]; imports = ["..."]; commands = ["gh"]; hosts = ["api.github.com"]
+//	on = "folders"                         # optional: forbidden only on the folders this config key names
+//	writes = [".se/x"]                     # top level, an I/O component's: the folders it writes (Writes)
 //
 // A type is int, float, string, bool, [T] for a list of T, or a named JSON
 // shape such as github.issues, which Go reads as any.
@@ -169,7 +173,7 @@ func ParseDeclaration(data []byte) (*Component, error) {
 		derive: map[string]*derivation{}, commands: map[string]*command{}, requests: map[string]*RequestDecl{},
 		verbs: map[string]*verb{}, decl: &declared{hash: Hash(data), inShapes: map[string]string{}},
 	}
-	d.keys(doc, "", "name", "contract", "io", "help", "inputs", "outputs", "config", "commands", "requests", "verbs")
+	d.keys(doc, "", "name", "contract", "io", "help", "inputs", "outputs", "config", "commands", "requests", "verbs", "forbids", "writes")
 	if v, ok := doc["contract"].(int64); !ok || v != Contract {
 		d.fail("contract is %v, and this core speaks contract = %d", doc["contract"], Contract)
 	}
@@ -281,6 +285,17 @@ func ParseDeclaration(data []byte) (*Component, error) {
 	if len(c.verbs) > 0 && !c.io {
 		c.fail("component %s accepts verbs but carries no I/O flag: only an I/O component reaches the outside", name)
 	}
+	if _, ok := doc["forbids"]; ok {
+		f := d.forbids(d.table(doc, "forbids"))
+		c.forbids = &f
+	}
+	if v, ok := doc["writes"]; ok {
+		c.writes = d.strings(v, "writes")
+		if c.writes == nil {
+			c.writes = []string{}
+		}
+	}
+	c.checkForbids()
 	c.errs = append(d.errs, c.errs...)
 	if err := c.Err(); err != nil {
 		return nil, err
@@ -391,6 +406,44 @@ func (d *decoder) flag(t map[string]any, where, key string) bool {
 		d.fail("%s: %s is true or false", where, key)
 	}
 	return b
+}
+
+// forbids reads a declaration's [forbids] table: its calls, imports,
+// commands and hosts, each a list of strings.
+func (d *decoder) forbids(t map[string]any) Forbidden {
+	d.keys(t, "forbids", "calls", "imports", "commands", "hosts", "on")
+	list := func(key string) []string {
+		v, ok := t[key]
+		if !ok {
+			return nil
+		}
+		return d.strings(v, "forbids."+key)
+	}
+	f := Forbidden{Calls: list("calls"), Imports: list("imports"), Commands: list("commands"), Hosts: list("hosts")}
+	if v, ok := t["on"]; ok {
+		on, isString := v.(string)
+		if !isString {
+			d.fail("forbids.on is a config key's name")
+		}
+		f.On = on
+	}
+	return f
+}
+
+// strings reads a list of strings, the key's name where in its refusal.
+func (d *decoder) strings(v any, where string) []string {
+	items, ok := v.([]any)
+	var out []string
+	for _, item := range items {
+		s, isString := item.(string)
+		ok = ok && isString
+		out = append(out, s)
+	}
+	if !ok {
+		d.fail("%s is a list of strings", where)
+		return nil
+	}
+	return out
 }
 
 // port reads a declared port's type, built-in value and help.

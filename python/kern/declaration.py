@@ -123,6 +123,12 @@ class Declaration:
     commands: dict[str, CommandDecl] = field(default_factory=dict)
     requests: dict[str, RequestDecl] = field(default_factory=dict)
     verbs: dict[str, RequestDecl] = field(default_factory=dict)
+    # an I/O component's forbid list, by kind: calls, imports, commands, hosts (README.md "Forbid lists")
+    forbids: dict[str, list[str]] = field(default_factory=dict)
+    # where set, the config key naming the folders the forbid list's entries are forbidden on
+    forbids_on: str = ""
+    # the folders it writes with direct file calls (Go's index.Writes)
+    writes: list[str] | None = None
 
     def derivations(self) -> list[str]:
         return sorted(p for p, o in self.outputs.items() if o.derived)
@@ -145,7 +151,7 @@ def parse(data: bytes) -> Declaration:
     except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
         raise DeclarationError(f"declaration: {e}") from None
     errs: list[str] = []
-    _keys(errs, doc, "", ("name", "contract", "io", "help", "inputs", "outputs", "config", "commands", "requests", "verbs"))
+    _keys(errs, doc, "", ("name", "contract", "io", "help", "inputs", "outputs", "config", "commands", "requests", "verbs", "forbids", "writes"))
     name = doc.get("name")
     if not isinstance(name, str):
         errs.append("no name")
@@ -223,9 +229,69 @@ def parse(data: bytes) -> Declaration:
             errs.append(f"port {port} is both an input and an output")
     if d.verbs and not d.io:
         errs.append(f"component {name} accepts verbs but carries no I/O flag: only an I/O component reaches the outside")
+    if "forbids" in doc:
+        _forbids(errs, d, _table(errs, doc, "forbids"))
+    if "writes" in doc:
+        _writes(errs, d, doc["writes"])
     if errs:
         raise DeclarationError(f"component {name}: " + "; ".join(errs))
     return d
+
+
+_FORBIDDEN = {
+    "calls": (re.compile(r"^[A-Za-z0-9_./-]*[A-Za-z0-9_]\.[A-Za-z_][A-Za-z0-9_]*$"), "call: <package>.<name>, such as time.Now"),
+    "imports": (re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]*$"), "import: a package path, such as github.com/google/go-github"),
+    "commands": (re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.+-]*$"), "command: a program's name, such as gh"),
+    "hosts": (re.compile(r"^[a-z0-9-]+(\.[a-z0-9-]+)+$"), "host: a lowercase DNS name, such as api.github.com"),
+}
+
+
+def _forbids(errs: list[str], d: Declaration, t: dict) -> None:
+    """Read [forbids], refusing it on a component without the I/O flag, as Go's index.Forbids does."""
+    _keys(errs, t, "forbids", (*_FORBIDDEN, "on"))
+    on = t.get("on", "")
+    if not isinstance(on, str):
+        errs.append("forbids.on is a config key's name")
+        on = ""
+    d.forbids_on = on
+    for key in _FORBIDDEN:
+        v = t.get(key, [])
+        if not isinstance(v, list) or not all(isinstance(e, str) for e in v):
+            errs.append(f"forbids.{key} is a list of strings")
+            continue
+        if v:
+            d.forbids[key] = list(v)
+    if not d.io:
+        errs.append(f"component {d.name} forbids what it replaces but carries no I/O flag: only an I/O component owns a forbid list")
+        return
+    for key, (pattern, want) in _FORBIDDEN.items():
+        seen: set[str] = set()
+        for e in d.forbids.get(key, []):
+            if not pattern.fullmatch(e):
+                errs.append(f"forbids.{key}: {_q(e)} is no {want}")
+            elif e in seen:
+                errs.append(f"forbids.{key}: {_q(e)} is named twice")
+            seen.add(e)
+    if not d.forbids:
+        errs.append("forbids names nothing: list the calls, imports, commands or hosts only this I/O component may use")
+    if on and (on not in d.config or d.config[on].type != "[string]"):
+        errs.append(f"forbids.on: {_q(on)} is no config key of the component's that lists folders: declare it as a list of strings")
+
+
+def _writes(errs: list[str], d: Declaration, v: object) -> None:
+    """Read writes, the folders a component writes with direct file calls, as Go's index.Writes does."""
+    if not isinstance(v, list) or not all(isinstance(e, str) for e in v):
+        errs.append("writes is a list of strings")
+        return
+    d.writes = list(v)
+    if not d.io:
+        errs.append(f"component {d.name} declares the folders it writes but carries no I/O flag: a component that writes files reaches the outside")
+    if not v:
+        errs.append("writes names no folder")
+    for f in v:
+        segs = f.split("/")
+        if not f or f.startswith("/") or "\\" in f or ":" in f or any(x in ("", ".", "..") for x in segs):
+            errs.append(f"writes: {_q(f)} is no folder relative to the checkout, slash-separated, such as .se/.runtime/sessions")
 
 
 def _keys(errs: list[str], t: dict, where: str, allowed: tuple[str, ...]) -> None:
