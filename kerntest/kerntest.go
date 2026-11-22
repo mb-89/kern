@@ -392,17 +392,16 @@ func (f *Fake) answer(a index.Ask) (any, error) {
 }
 
 // expected answers a request from the fake's expectations: the first whose
-// ask the request matches, of the test's givens first, then of none.
+// ask the request matches, one that holds its ask exact before one matched
+// by type, and within each, of the test's givens before one of none.
 func (f *Fake) expected(a index.Ask) (any, error) {
 	f.mu.Lock()
 	givens := f.givens
 	f.mu.Unlock()
-	for _, mine := range []func(Expectation) bool{
-		func(e Expectation) bool { return e.Given != "" && givens[e.Given] },
-		func(e Expectation) bool { return e.Given == "" },
-	} {
+	for _, tier := range []struct{ exact, given bool }{{true, true}, {true, false}, {false, true}, {false, false}} {
 		for _, e := range f.expect.Expect {
-			if e.Request != a.Port || !mine(e) || Match("ask", e.Ask, a.Value, e.Exact) != nil {
+			mine := e.Given == "" && !tier.given || e.Given != "" && tier.given && givens[e.Given]
+			if e.Request != a.Port || !mine || exactAsk(e) != tier.exact || Match("ask", e.Ask, a.Value, e.Exact) != nil {
 				continue
 			}
 			if e.Refused {
@@ -412,6 +411,16 @@ func (f *Fake) expected(a index.Ask) (any, error) {
 		}
 	}
 	return nil, fmt.Errorf("%s: no expectation answers the request %s on port %s: state it there", f.expect.File, show(a.Value), a.Port)
+}
+
+// exactAsk says whether e holds some of its ask exact.
+func exactAsk(e Expectation) bool {
+	for _, p := range e.Exact {
+		if p == "ask" || strings.HasPrefix(p, "ask.") || strings.HasPrefix(p, "ask[") {
+			return true
+		}
+	}
+	return false
 }
 
 // Lines answers the progress lines every command run so far said, in order.

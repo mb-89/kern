@@ -281,6 +281,10 @@ func TestAReadersTestIsAnsweredFromItsOwnExpectations(t *testing.T) {
 	if text, err := f.Call("file", "z"); err != nil || text != "filed as line 3" {
 		t.Fatalf("file given two lines stand answered %q, %v", text, err)
 	}
+	// An expectation that holds its ask exact answers before one matched by type, given or not.
+	if _, err := f.Call("file", ""); err == nil || !strings.Contains(err.Error(), "refused, as expect 3") {
+		t.Fatalf("given two lines stand, an empty line was answered: %v", err)
+	}
 	must(f.Derive("sum"))
 	if got, _ := f.Out("sum"); got != (index.Value{V: 0, Provided: true}) {
 		t.Fatalf("sum, numbers stand no longer given, is %+v", got)

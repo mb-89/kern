@@ -228,6 +228,8 @@ def test_a_readers_test_is_answered_from_its_own_expectations(tmp_path: Path) ->
         fake.run("file", "")
     fake.given("two lines stand")
     assert fake.run("file", "z") == "filed as line 3"
+    with pytest.raises(KernError, match="refused, as expect 3"):
+        fake.run("file", "")
     fake.derive("sum")
     assert fake.out("sum").value == 0
     with pytest.raises(KernError, match="is answered from"):

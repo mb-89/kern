@@ -189,13 +189,14 @@ class Fake:
         return v
 
     def _expected(self, a: Ask) -> Any:
-        """A request's answer from the expectations: the first whose ask it matches, of the test's givens first,
-        then of none."""
+        """A request's answer from the expectations: the first whose ask it matches, one that holds its ask exact
+        before one matched by type, and within each, of the test's givens before one of none."""
         x = self.expectations
         assert x is not None
-        for mine in (lambda e: e.given in self._givens, lambda e: not e.given):
+        for exact, given in ((True, True), (True, False), (False, True), (False, False)):
             for e in x.expect:
-                if e.request != a.port or not mine(e):
+                mine = (e.given in self._givens) if given else not e.given
+                if e.request != a.port or not mine or _exact_ask(e) != exact:
                     continue
                 try:
                     expect.match("ask", e.ask, a.value, e.exact)
@@ -229,6 +230,11 @@ def expecting(comp: Component, path: str | Path) -> Fake:
     f.expectations = x
     f.given()
     return f
+
+
+def _exact_ask(e: expect.Expectation) -> bool:
+    """Whether e holds some of its ask exact."""
+    return any(p == "ask" or p.startswith(("ask.", "ask[")) for p in e.exact)
 
 
 def _at(port: str, key: str) -> str:
