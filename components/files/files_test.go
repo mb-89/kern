@@ -507,11 +507,25 @@ func TestTheModuleMeetsThePooledExpectations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var root string // each fresh instance's folder
 	m := kerntest.Module{
 		Component: files.Component.Component,
 		File:      "expect.toml",
 		Fresh: func() *index.Component {
-			return files.New(files.Options{Root: t.TempDir(), Watch: func() (files.Watcher, error) { return newFed(), nil }}).Component
+			root = t.TempDir()
+			return files.New(files.Options{Root: root, Watch: func() (files.Watcher, error) { return newFed(), nil }}).Component
+		},
+		Given: map[string]kerntest.Setup{
+			// The checker's (components/lsp/expect.toml): a managed file and its template.
+			"a file breaks its template": func(f *kerntest.Fake) error {
+				s := &setup{t: t, root: root}
+				s.put("docs/a.md", "<!-- se:form note -->\n\n## Kind\n\nmaybe\n")
+				s.put("docs/templates/note.json", `{"form": "note"}`)
+				if err := f.Config("folders", []string{"docs"}); err != nil {
+					return err
+				}
+				return f.Start("files")
+			},
 		},
 	}
 	if err := m.Meet(p); err != nil {

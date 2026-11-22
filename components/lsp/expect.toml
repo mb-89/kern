@@ -1,0 +1,31 @@
+# What the lsp component's tests rely on (README.md "Expectations"): the files module's model of
+# the managed folders and the folders themselves. The files component claims both, and its test
+# meets them against a temporary folder that holds these files.
+
+[[expect]]
+name = "files.model"
+port = "model"
+given = "a file breaks its template"
+value = { "docs_2fa.md" = { path = "docs/a.md", hash = "1f", size = 32, held = true, content = """
+<!-- se:form note -->
+
+## Kind
+
+maybe
+""" }, "docs_2ftemplates_2fnote.json" = { path = "docs/templates/note.json", hash = "2e", size = 280, held = true, content = """
+{"form": "note", "markers": ["<!-- se:form note -->"],
+ "field_shape": {"kind": {"kind": "choice", "heading": "Kind", "required": true, "choices": ["idea", "fact"]},
+                 "gist": {"kind": "text", "heading": "Gist", "required": true}},
+ "schema": {"type": "object", "properties": {"kind": {"type": "string"}, "gist": {"type": "string"}}}}
+""" } }
+
+[[expect]]
+name = "files.folders"
+port = "folders"
+given = "a file breaks its template"
+value = ["docs"]
+exact = ["value"]
+
+[[claim]]
+name = "lsp.findings"
+port = "findings"
