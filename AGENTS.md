@@ -17,6 +17,8 @@ uv run --no-project --python ">=3.11" python <se>/scripts/work_tickets.py suite 
   `[tests.beside.template]` (the bare application's tests) and `[tests.beside.release-guard]`.
 - The focused tests are the packages a change touches, `go test ./<package>/`, and `uv run pytest
   -q` for a change under `python/`; the complete suite is `work_tickets.py suite`.
+- No test waits on the wall clock: a time limit under test is shortened or faked (README.md
+  "Tests"), never waited out.
 - `gofmt -l $(git ls-files '*.go')` lists nothing: `check` fails on any file it lists.
 - `.github/workflows/check.yml` is the check `check` the ruleset requires (README.md "Tests").
 

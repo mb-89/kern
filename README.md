@@ -210,6 +210,11 @@ the template's, and `[tests.beside.release-guard]` (below).
 `work_tickets.py suite --worktree .`, SE's suite command at kern's SE pin, runs them all, and
 `integrate` runs the same, so a red test refuses the integration.
 
+No test waits on the wall clock. A time limit under test (a step wait, a reply's expiry, a hang-up,
+a beat) is shortened to milliseconds through the core's options or its `KERN_*` variables, or the
+case reads a fake clock or the state that settles it instead; a deadline only bounds a wait for
+something that happens at once where the test passes.
+
 `.github/workflows/check.yml` is the check `main`'s ruleset requires, `check`. Its job `check`
 gates the commits with SE's public check, holds a pull request to the work model's issue rule and
 its field report, fails where `gofmt -l` lists a file, vets kern and runs the suite (`--full`
