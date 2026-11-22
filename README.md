@@ -323,6 +323,27 @@ either field style, and prints a deny in the shape that payload's host reads
 | Copilot CLI, camelCase format | `preToolUse` | `toolName` as the runtime name (`create`, `edit`, `bash`, `grep`, `glob`), `toolArgs`, an object or a JSON string | `permissionDecision` `deny` and `permissionDecisionReason` at the top level; exit code 2 denies |
 | VS Code (Copilot harness) | `PreToolUse` | `tool_name`, `tool_input` | `hookSpecificOutput`; exit code 2 hands the model the standard error, the reason |
 
+### Which hosts have such a hook
+
+The comment of 22 Nov on kern#21 asks which hosts have a hook that can refuse a tool call; where
+one has none, its writes go past the warm model, which the person accepted: the watcher and
+compare-and-swap keep the model right.
+
+> So a host without hooks or any other tool still writes past it. Yeah, that's acceptable.
+
+| host | its hook | the gap |
+|---|---|---|
+| Claude Code (terminal, IDE, cloud) | `PreToolUse` | none known |
+| Copilot CLI | `preToolUse` / `PreToolUse`, from user, project and plugin hook files | a command hook that crashes fails closed (`kern hook` exits 0 on every error, 2 only on a deny); which reason the CLI shows for exit code 2 with JSON on stdout its reference does not say, so the reason is on both |
+| Copilot cloud agent (github.com) | the repository's hook files, `bash` entries alone; `preToolUse` fires | the runner has no kern binary unless the repository's setup steps place one; without it the hook prints nothing and every call passes |
+| VS Code, Copilot harness | `PreToolUse`, the CLI's runtime and Claude names | none known |
+| VS Code, Local harness (deprecated, removed February 2027) | `PreToolUse` | its tool names differ and are not mapped (`host.CopilotTools` holds the CLI's), so its writes and searches pass |
+| any MCP host without a hook that refuses a call | none | its native writes pass; the MCP door's `files` and `files_write` are the same way in, served to every host that runs the door |
+
+Registering the hook is the application's: SE's Claude Code plugin runs `kern hook` on
+`PreToolUse` through its `se_hook.sh`; its Copilot hook files register `SessionStart` and `Stop`
+alone, so a Copilot session under SE sees no deny until they register `PreToolUse` too.
+
 Every host fails open on a hook's time-out, and `kern hook` prints nothing and exits 0 where no
 core answers: with kern down every tool call passes, reads and searches included. Sources: the
 Copilot CLI's hooks reference (docs.github.com, copilot/reference/hooks-reference), VS Code's
