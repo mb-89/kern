@@ -104,9 +104,14 @@ type CommandDecl struct {
 	// outside service. Only such a command is offered by kern's MCP door
 	// (package mcp), whatever its class.
 	ReadOnly bool
+	// Writes declares that it writes only through its requests, which the
+	// core delivers to the I/O verbs the wiring binds: kern's MCP door offers
+	// it as a writing tool. A command is read-only or writing, not both; one
+	// that is neither, as one that syncs the checkout, is in no tool.
+	Writes bool
 	// MCP is what an agent host reads of it as a tool of the MCP door: when
-	// to use it. The door's catalog check (mcp.Tools) refuses a read-only
-	// command without it.
+	// to use it. The door's catalog check (mcp.Tools) refuses a read-only or
+	// writing command without it.
 	MCP string
 }
 
@@ -128,6 +133,10 @@ type RequestDecl struct {
 	Help     string
 	// ReqShape and AnsShape are the named JSON shapes of a declared port's request and answer.
 	ReqShape, AnsShape string
+	// Self is a verb of the port's own I/O component, which the port is bound
+	// to where the wiring binds it to nothing: an I/O component's command
+	// asks its own verb through the core, as any command asks one.
+	Self string
 }
 
 // VerbDecl is a verb an I/O component accepts: the request it takes and the answer it gives.
@@ -647,6 +656,13 @@ func Request[Req, Ans any](port, help string) *RequestPort[Req, Ans] {
 	return &RequestPort[Req, Ans]{RequestDecl{Port: port, Req: reflect.TypeFor[Req](), Ans: reflect.TypeFor[Ans](), Help: help}}
 }
 
+// Self binds the port to verb, a verb of its own I/O component, where the
+// wiring binds it to nothing (RequestDecl.Self); a wire binds it elsewhere.
+func (r *RequestPort[Req, Ans]) Self(verb string) *RequestPort[Req, Ans] {
+	r.decl.Self = verb
+	return r
+}
+
 // Ask is a request of v on the port.
 func (r *RequestPort[Req, Ans]) Ask(v Req) Ask { return Ask{Port: r.decl.Port, Value: v} }
 
@@ -734,6 +750,9 @@ func (c *Component) addCommand(k *command) {
 	}
 	if d.Class != Interactive && d.Class != Batch {
 		c.fail("command %q has no class: %s or %s", d.Name, Interactive, Batch)
+	}
+	if d.ReadOnly && d.Writes {
+		c.fail("command %q is declared read-only and writing: it is one or the other", d.Name)
 	}
 	if _, taken := c.commands[d.Name]; taken {
 		c.fail("command %q is declared twice", d.Name)

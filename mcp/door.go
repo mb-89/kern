@@ -163,7 +163,7 @@ func (d *door) server() (*sdk.Server, error) {
 	s := sdk.NewServer(&sdk.Implementation{Name: o.App, Title: o.App, Version: o.Version}, &sdk.ServerOptions{
 		// The tools are fixed for the connection: no tools/list_changed.
 		Capabilities: &sdk.ServerCapabilities{Tools: &sdk.ToolCapabilities{}},
-		Instructions: fmt.Sprintf("%s's core in %s, its read-only commands as tools. A tool that answers %q waits for the core's start: call it again in a few seconds.", o.App, o.Root, Starting),
+		Instructions: fmt.Sprintf("%s's core in %s, its read-only commands as tools, and its writing commands as the tools named <instance>_write. A tool that answers %q waits for the core's start: call it again in a few seconds.", o.App, o.Root, Starting),
 	})
 	err := o.CatalogErr
 	var tools []Tool
@@ -174,10 +174,13 @@ func (d *door) server() (*sdk.Server, error) {
 	}
 	for _, t := range tools {
 		t := t
-		destructive, open := false, t.OpenWorld
+		// A writing tool says it writes: not read-only, and destructive as
+		// MCP reads a writing tool that says no more, since the door cannot
+		// know a write is only additive.
+		destructive, open := t.Writes, t.OpenWorld
 		tool := &sdk.Tool{
 			Name: t.Name, Title: t.Title, Description: t.Description, InputSchema: schema(t),
-			Annotations: &sdk.ToolAnnotations{Title: t.Title, ReadOnlyHint: true, DestructiveHint: &destructive, IdempotentHint: true, OpenWorldHint: &open},
+			Annotations: &sdk.ToolAnnotations{Title: t.Title, ReadOnlyHint: !t.Writes, DestructiveHint: &destructive, IdempotentHint: !t.Writes, OpenWorldHint: &open},
 		}
 		s.AddTool(tool, func(ctx context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
 			return d.call(ctx, t, req.Params.Arguments), nil

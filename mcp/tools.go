@@ -1,7 +1,7 @@
 // Package mcp is kern's MCP door: `<name> mcp`, an MCP server over stdio that
-// offers the core's read-only commands (index.CommandDecl.ReadOnly) to an
-// agent host as a few coarse tools, generated from the catalog
-// (index.Catalog), never written per tool.
+// offers the core's read-only commands (index.CommandDecl.ReadOnly) and its
+// writing ones (index.CommandDecl.Writes) to an agent host as a few coarse
+// tools, generated from the catalog (index.Catalog), never written per tool.
 //
 // A host spawns its configured stdio servers as a session starts, so the door
 // answers initialize and tools/list at once, from the catalog it reads without
@@ -19,13 +19,16 @@ import (
 	"kern/index"
 )
 
-// The door's own tools, beside one per instance that offers read-only commands.
+// The door's own tools, beside one per instance that offers read-only
+// commands and one per instance that offers writing commands.
 const (
 	// StatusTool says whether the core runs and its health.
 	StatusTool = "status"
 	// GreetingTool answers the application's greeting: the names and
 	// commands it names (Options.Greeting).
 	GreetingTool = "greeting"
+	// WriteSuffix ends the name of an instance's writing tool: <tool>_write.
+	WriteSuffix = "_write"
 )
 
 // Tool is one tool the door offers, as the catalog makes it.
@@ -34,9 +37,12 @@ type Tool struct {
 	// Instance is the instance a command tool runs the commands of; empty for
 	// the door's own tools.
 	Instance string
-	// Commands are the read-only commands a command tool runs, by name; empty
-	// for the door's own tools.
+	// Commands are the commands a command tool runs, by name: read-only
+	// ones, or writing ones where Writes is set; empty for the door's own tools.
 	Commands []index.CommandInfo
+	// Writes is set on an instance's writing tool: its commands write, each
+	// only through its instance's requests to the I/O verbs the wiring binds.
+	Writes bool
 	// Greeting are the greeting tool's entries: each a name or a command.
 	Greeting []Entry
 	// OpenWorld is set where the tool may read outside services: every
@@ -59,16 +65,18 @@ var toolName = regexp.MustCompile(`^[a-z0-9_]{1,64}$`)
 func ToolName(instance string) string { return strings.ReplaceAll(instance, "-", "_") }
 
 // Tools answers the door's tools for the catalog: status, the greeting where
-// the application names one, and one tool per switched-on instance that
-// offers read-only commands (index.CommandDecl.ReadOnly), named after the
-// instance in snake_case (ToolName). A command that is not declared
-// read-only is in no tool, whatever its class.
+// the application names one, one tool per switched-on instance that offers
+// read-only commands (index.CommandDecl.ReadOnly), named after the instance
+// in snake_case (ToolName), and one per switched-on instance that offers
+// writing commands (index.CommandDecl.Writes), named the same with
+// WriteSuffix. A command declared neither is in no tool, whatever its class.
 //
-// It is the door's catalog check: it refuses a read-only command without an
-// MCP description (index.CommandDecl.MCP), an instance whose tool name is
-// none or takes one of the door's own, and a greeting entry that is a
-// command not declared read-only. A greeting entry the catalog lacks is left
-// out, so a checkout that wires less greets with less.
+// It is the door's catalog check: it refuses a read-only or writing command
+// without an MCP description (index.CommandDecl.MCP), a writing command of an
+// instance that has no request to write through, an instance whose tool name
+// is none or takes one of the door's own or another tool's, and a greeting
+// entry that is a command not declared read-only. A greeting entry the
+// catalog lacks is left out, so a checkout that wires less greets with less.
 func Tools(app string, c index.Catalog, greeting []string) ([]Tool, error) {
 	var errs []string
 	enabled := map[string]index.InstanceInfo{}
@@ -85,15 +93,28 @@ func Tools(app string, c index.Catalog, greeting []string) ([]Tool, error) {
 		}
 	}
 	byInstance := map[string][]index.CommandInfo{}
+	writing := map[string][]index.CommandInfo{}
 	for _, ci := range c.Commands {
-		if !ci.ReadOnly {
+		if !ci.ReadOnly && !ci.Writes {
 			continue
+		}
+		what := "read-only"
+		if ci.Writes {
+			what = "writing"
 		}
 		if strings.TrimSpace(ci.MCP) == "" {
-			errs = append(errs, fmt.Sprintf("command %q of instance %s is read-only and has no mcp description", ci.Name, ci.Instance))
+			errs = append(errs, fmt.Sprintf("command %q of instance %s is %s and has no mcp description", ci.Name, ci.Instance, what))
 			continue
 		}
-		byInstance[ci.Instance] = append(byInstance[ci.Instance], ci)
+		if ci.ReadOnly {
+			byInstance[ci.Instance] = append(byInstance[ci.Instance], ci)
+			continue
+		}
+		if len(enabled[ci.Instance].Requests) == 0 {
+			errs = append(errs, fmt.Sprintf("command %q of instance %s is writing, and the instance has no request to write through: declare a request port and wire it to an I/O verb", ci.Name, ci.Instance))
+			continue
+		}
+		writing[ci.Instance] = append(writing[ci.Instance], ci)
 	}
 	tools := []Tool{{
 		Name: StatusTool, Title: app + " status",
@@ -125,17 +146,14 @@ func Tools(app string, c index.Catalog, greeting []string) ([]Tool, error) {
 		}
 		tools = append(tools, Tool{Name: GreetingTool, Title: app + " greeting", Description: b.String(), Greeting: entries, OpenWorld: true})
 	}
-	names := make([]string, 0, len(byInstance))
-	for n := range byInstance {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, n := range names {
+	taken := map[string]string{StatusTool: "the door's own", GreetingTool: "the door's own"}
+	for _, n := range sortedKeys(byInstance) {
 		name := ToolName(n)
-		if name == StatusTool || name == GreetingTool || !toolName.MatchString(name) {
-			errs = append(errs, fmt.Sprintf("instance %s offers read-only commands, and %q is no tool name of its own: rename it in the wiring", n, name))
+		if by, ok := taken[name]; ok || !toolName.MatchString(name) {
+			errs = append(errs, fmt.Sprintf("instance %s offers read-only commands, and %q is no tool name of its own%s: rename it in the wiring", n, name, takenBy(by)))
 			continue
 		}
+		taken[name] = "instance " + n + "'s read-only tool"
 		in := enabled[n]
 		var b strings.Builder
 		fmt.Fprintf(&b, "%s Runs one of its read-only commands, named in `command`, with `args` as its usage shows; it changes nothing. Use it:", strings.TrimSpace(in.Help))
@@ -144,10 +162,42 @@ func Tools(app string, c index.Catalog, greeting []string) ([]Tool, error) {
 		}
 		tools = append(tools, Tool{Name: name, Title: app + " " + n, Description: b.String(), Instance: n, Commands: byInstance[n], OpenWorld: true})
 	}
+	for _, n := range sortedKeys(writing) {
+		name := ToolName(n) + WriteSuffix
+		if by, ok := taken[name]; ok || !toolName.MatchString(name) {
+			errs = append(errs, fmt.Sprintf("instance %s offers writing commands, and %q is no tool name of its own%s: rename it in the wiring", n, name, takenBy(by)))
+			continue
+		}
+		taken[name] = "instance " + n + "'s writing tool"
+		in := enabled[n]
+		var b strings.Builder
+		fmt.Fprintf(&b, "%s Runs one of its writing commands, named in `command`, with `args` as its usage shows: it writes, each write a request the core delivers to the I/O verb the wiring binds, as %s's every outside write goes. Use it:", strings.TrimSpace(in.Help), app)
+		for _, ci := range writing[n] {
+			fmt.Fprintf(&b, "\n- `%s`: %s Usage: `%s`", ci.Name, strings.TrimSpace(ci.MCP), oneLine(ci.Usage))
+		}
+		tools = append(tools, Tool{Name: name, Title: app + " " + n + " (writes)", Description: b.String(), Instance: n, Commands: writing[n], Writes: true, OpenWorld: true})
+	}
 	if len(errs) > 0 {
 		return tools, fmt.Errorf("the MCP door's catalog check: %s", strings.Join(errs, "; "))
 	}
 	return tools, nil
+}
+
+// takenBy says whose tool a name already is, where it is one.
+func takenBy(by string) string {
+	if by == "" {
+		return ""
+	}
+	return ", it is " + by + "'s"
+}
+
+func sortedKeys(m map[string][]index.CommandInfo) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // oneLine joins a usage argparse wrapped onto one line.

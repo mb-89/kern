@@ -44,6 +44,8 @@ host-hook	components/github/step_test.go	mcp__github__
 host-hook	components/github/step_test.go	tool_input
 host-hook	components/github/step_test.go	tool_name
 host-hook	components/github/step_test.go	tool_response
+host-hook	components/github/write_test.go	PostToolUse
+host-hook	components/github/write_test.go	mcp__github__
 host-hook	components/session/session_test.go	"Bash"
 host-hook	components/session/session_test.go	PostToolUse
 host-hook	components/session/session_test.go	tool_input
@@ -105,6 +107,8 @@ se-file	README.md	scripts/git_door.py
 se-file	README.md	scripts/se_workflows.py
 se-file	README.md	se.toml
 se-file	cli/cli.go	.se/wiring
+se-file	components/github/README.md	.se/templates
+se-file	components/github/github.go	.se/templates
 se-file	components/session/README.md	.se/wiring
 se-file	git/contract_test.go	scripts/adhoc.py
 se-file	git/contract_test.go	scripts/tracked.py
