@@ -5,8 +5,8 @@ contract = 1
 help = "Drips progress lines."
 
 [commands."drip talk"]
-usage = "drip talk COUNT"
-summary = "Say COUNT lines, a quarter second apart."
+usage = "drip talk COUNT SECONDS"
+summary = "Say COUNT lines, SECONDS apart."
 group = "Fixtures"
 help = "Says each line as it goes, then answers how many it said."
 class = "batch"

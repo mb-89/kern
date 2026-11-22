@@ -72,8 +72,8 @@ type Options struct {
 	Components []*index.Component
 	// Clock is the time the core reads; the wall clock where none is given.
 	Clock Clock
-	// Grace, Idle and LeaseLapse override the built-in spans where set.
-	Grace, Idle, LeaseLapse time.Duration
+	// Grace, Idle, LeaseLapse and HangUp override the built-in spans where set.
+	Grace, Idle, LeaseLapse, HangUp time.Duration
 	// StepWait and CallBeat override the built-in waits of a call where set.
 	StepWait, CallBeat time.Duration
 	// ReplyWait, where set, bounds how long a declared instance's process may
@@ -166,6 +166,9 @@ func Serve(o Options) (*Core, error) {
 	}
 	if o.LeaseLapse == 0 {
 		o.LeaseLapse = LeaseLapse
+	}
+	if o.HangUp == 0 {
+		o.HangUp = HangUp
 	}
 	if o.StepWait == 0 {
 		o.StepWait = StepWait
@@ -295,7 +298,7 @@ func (c *Core) answer() error {
 			c.reply(m, map[string]any{"pid": c.pid})
 			// The asker hangs up once it has the answer; one that stays on delays the stop by HangUp at most.
 			if m.Reply != "" {
-				c.bus.Unheard(m.Reply, HangUp)
+				c.bus.Unheard(m.Reply, c.o.HangUp)
 			}
 			c.Stop("asked to stop")
 		}},

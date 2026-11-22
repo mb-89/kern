@@ -41,16 +41,16 @@ func placeDrip(t *testing.T, root string) {
 }
 
 // The real core with drip in its own Python process and the bus's reply wait
-// lowered to 1 s (cli.ReplyWaitEnv), where the step wait is 30 s: a step that
+// lowered to 200 ms (cli.ReplyWaitEnv), where the step wait is 30 s: a step that
 // answers after its reply permission ran out is refused by the bus, and the
 // runner says so, so the call fails at once, naming the refusal, and never
 // waits out the step wait in silence. Without the bound, as kern serves, the
 // same answer lands (TestAStepAnswersAfterALongLocalPhase, the long one,
-// holds that against NATS's own two minutes).
+// holds that against the server's own expiry).
 func TestAStepAnswerTheBusRefusesFailsTheCallAtOnce(t *testing.T) {
 	root := checkout(t)
 	placeDrip(t, root)
-	env := []string{"PYTHONPATH=" + sdk(t), "PYTHONDONTWRITEBYTECODE=1", cli.StepWaitEnv + "=30s", cli.ReplyWaitEnv + "=1s"}
+	env := []string{"PYTHONPATH=" + sdk(t), "PYTHONDONTWRITEBYTECODE=1", cli.StepWaitEnv + "=30s", cli.ReplyWaitEnv + "=200ms"}
 	want(t, run(t, env, "start", "--root", root), 0, "kern: started")
 	want(t, run(t, nil, "status", "--root", root, "--wait", wait), 0, "kern: running")
 	s := standing(t, root)
@@ -61,7 +61,7 @@ func TestAStepAnswerTheBusRefusesFailsTheCallAtOnce(t *testing.T) {
 	t.Cleanup(client.Close)
 
 	began := time.Now()
-	m, err := client.Request(bus.Call+bus.Token("drip quiet"), []byte(`{"args":["1.5"]}`), 60*time.Second)
+	m, err := client.Request(bus.Call+bus.Token("drip quiet"), []byte(`{"args":["0.5"]}`), 60*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestAStepAnswerTheBusRefusesFailsTheCallAtOnce(t *testing.T) {
 	if took := time.Since(began); took > 20*time.Second {
 		t.Fatalf("the refused answer failed the call after %v: it waited for the step wait of 30 s", took)
 	}
-	m, err = client.Request(bus.Call+bus.Token("drip quiet"), []byte(`{"args":["0.2"]}`), 60*time.Second)
+	m, err = client.Request(bus.Call+bus.Token("drip quiet"), []byte(`{"args":["0"]}`), 60*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,13 +86,13 @@ func TestAStepAnswerTheBusRefusesFailsTheCallAtOnce(t *testing.T) {
 }
 
 // The real core with drip placed in its own Python process and the core's
-// step wait lowered to 1 s: a step that talks outlives it, as each line
+// step wait lowered to 200 ms: a step that talks outlives it, as each line
 // restarts the wait; one that stays silent past it fails, naming the wait. A
 // streaming caller hears every line, in order, before the one answer.
 func TestARealStepThatTalksOutlivesTheStepWaitAndStreamsToItsCaller(t *testing.T) {
 	root := checkout(t)
 	placeDrip(t, root)
-	env := []string{"PYTHONPATH=" + sdk(t), "PYTHONDONTWRITEBYTECODE=1", cli.StepWaitEnv + "=1s"}
+	env := []string{"PYTHONPATH=" + sdk(t), "PYTHONDONTWRITEBYTECODE=1", cli.StepWaitEnv + "=200ms"}
 	want(t, run(t, env, "start", "--root", root), 0, "kern: started")
 	want(t, run(t, nil, "status", "--root", root, "--wait", wait), 0, "kern: running")
 	s := standing(t, root)
@@ -110,7 +110,7 @@ func TestARealStepThatTalksOutlivesTheStepWaitAndStreamsToItsCaller(t *testing.T
 			t.Fatal(err)
 		}
 	}
-	body, _ := json.Marshal(map[string]any{"args": []string{"8"}, "progress": progress})
+	body, _ := json.Marshal(map[string]any{"args": []string{"8", "0.05"}, "progress": progress})
 	if err := client.PublishRequest(bus.Call+bus.Token("drip talk"), reply, body); err != nil {
 		t.Fatal(err)
 	}
@@ -143,13 +143,13 @@ func TestARealStepThatTalksOutlivesTheStepWaitAndStreamsToItsCaller(t *testing.T
 		want8 = append(want8, fmt.Sprintf("tick %d", i))
 	}
 	if a.Error != "" || a.Text != "said 8 lines" {
-		t.Fatalf("drip talk, two seconds against a step wait of one, answers %+v", a)
+		t.Fatalf("drip talk, 0.4 s against a step wait of 0.2 s, answers %+v", a)
 	}
 	if strings.Join(lines, "|") != strings.Join(want8, "|") || strings.Join(a.Lines, "|") != strings.Join(want8, "|") {
 		t.Fatalf("the caller heard %q and the answer holds %q, and both want %q in order", lines, a.Lines, want8)
 	}
 
-	m, err := client.Request(bus.Call+bus.Token("drip quiet"), []byte(`{"args":["2.5"]}`), 30*time.Second)
+	m, err := client.Request(bus.Call+bus.Token("drip quiet"), []byte(`{"args":["0.5"]}`), 30*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestARealStepThatTalksOutlivesTheStepWaitAndStreamsToItsCaller(t *testing.T
 	if err := json.Unmarshal(m.Data, &quiet); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(quiet.Error, "no answer, line or beat within 1s") {
+	if !strings.Contains(quiet.Error, "no answer, line or beat within 200ms") {
 		t.Fatalf("drip quiet, silent past the step wait, answers %+v, and wants the wait named", quiet)
 	}
 }

@@ -106,7 +106,6 @@ se-file	README.md	scripts/se_workflows.py
 se-file	README.md	se.toml
 se-file	cli/cli.go	.se/wiring
 se-file	components/session/README.md	.se/wiring
-se-file	contract/longstep_test.go	se.toml
 se-file	git/contract_test.go	scripts/adhoc.py
 se-file	git/contract_test.go	scripts/tracked.py
 se-file	home/home.go	scripts/se_home.py
@@ -140,7 +139,6 @@ se-name	bus/bus.go	SE
 se-name	components/github/README.md	SE
 se-name	components/github/github.go	SE
 se-name	contract/kern_test.go	SE
-se-name	contract/longstep_test.go	SE
 se-name	git/contract_test.go	SE
 se-name	git/git.go	SE
 se-name	git/gitfake/gitfake.go	SE

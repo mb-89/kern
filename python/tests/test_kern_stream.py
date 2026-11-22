@@ -21,8 +21,8 @@ contract = 1
 help = "Drips progress lines."
 
 [commands."drip talk"]
-usage = "drip talk"
-summary = "Say two lines, slowly."
+usage = "drip talk SECONDS"
+summary = "Say two lines, SECONDS apart."
 group = "Fixtures"
 help = "Says each line as it goes."
 class = "batch"
@@ -37,7 +37,7 @@ drip = component("drip")
 @drip.command("drip talk")
 def talk(args, inputs, say):
     say("one")
-    time.sleep(0.6)
+    time.sleep(float(args[0]))
     say("two")
     return "done"
 """
@@ -69,11 +69,11 @@ def test_a_step_says_its_lines_at_once_and_beats_while_it_runs(tmp_path: Path, m
     (tmp_path / "component.toml").write_text(DECLARATION, encoding="utf-8")
     (tmp_path / "__init__.py").write_text(INIT, encoding="utf-8")
     comp = runner.load(tmp_path)
-    monkeypatch.setattr(runner, "BEAT", 0.1)
+    monkeypatch.setattr(runner, "BEAT", 0.04)
     peer = Peer()
     run = runner.Runner(comp, peer, "drip")  # type: ignore[arg-type]
 
-    answer = run._step("drip talk", {"call": "7", "step": 1, "args": []})
+    answer = run._step("drip talk", {"call": "7", "step": 1, "args": ["0.2"]})
 
     assert answer["text"] == "done" and "lines" not in answer, answer
     said = [body for subject, body in peer.sent if subject == "say.drip.7"]
@@ -87,14 +87,13 @@ def test_a_step_says_its_lines_at_once_and_beats_while_it_runs(tmp_path: Path, m
     two = next(i for i, (s, b) in enumerate(peer.sent) if b.get("line") == "two")
     assert any(s == "say.drip.7" and "line" not in b for s, b in peer.sent[:two]), \
         "a beat comes between the lines, while the step sleeps"
-    before = len(peer.sent)
-    time.sleep(0.3)
-    assert len(peer.sent) == before, "no beat after the step answered"
+    assert not [t for t in threading.enumerate() if t.name == "kern-step-beat"], \
+        "no beat after the step answered: its beat has ended when the step returns"
 
 
 def test_a_beat_that_woke_as_the_step_ended_lands_before_the_step_returns(tmp_path: Path, monkeypatch) -> None:
     """Forces CI's interleaving: the step's work ends just after a beat woke, and that beat's say
-    and lease land 0.05 s later, under the test's BEAT. The stream test above still sees nothing
+    and lease land 0.02 s later, under the test's BEAT. The stream test above still sees nothing
     after the step answered, as the step returns only once its beat has ended."""
     armed, woke = threading.Event(), threading.Event()
     say, run_step = runner.Runner._say, runner.Runner._run_step
@@ -102,7 +101,7 @@ def test_a_beat_that_woke_as_the_step_ended_lands_before_the_step_returns(tmp_pa
     def held_say(self, call, line=None):  # the first beat to wake once the step's work is done
         if line is None and armed.is_set() and not woke.is_set():
             woke.set()
-            time.sleep(0.05)
+            time.sleep(0.02)
         return say(self, call, line)
 
     def run_step_until_a_beat_woke(self, *args):  # the step ends while that beat is on its way
@@ -193,22 +192,22 @@ def test_a_caller_that_stops_waiting_gives_its_call_up(monkeypatch) -> None:
 
     monkeypatch.setattr(peer, "publish", publish)
     try:
-        peer.request("call.slow", {"args": []}, 0.2, give_up=True)
+        peer.request("call.slow", {"args": []}, 0.01, give_up=True)
     except nats.NatsError as error:
-        assert "answers nothing within 0.2 s" in str(error)
+        assert "answers nothing within 0.01 s" in str(error)
     else:
         raise AssertionError("a silent call answers")
     assert sent[1][:2] == (nats.ABANDON, {"call": "_INBOX.c.1"}), sent
     sent.clear()
     try:
-        peer.call("call.long", {"args": []}, lambda m: None, idle=0.2)
+        peer.call("call.long", {"args": []}, lambda m: None, idle=0.01)
     except nats.NatsError:
         pass
     assert [s for s, _, _ in sent] == ["call.long", nats.ABANDON]
     assert sent[1][1] == {"call": sent[0][2]}
     sent.clear()
     try:
-        peer.request("call.quick", {}, 0.2)
+        peer.request("call.quick", {}, 0.01)
     except nats.NatsError:
         pass
     assert [s for s, _, _ in sent] == ["call.quick"], "without give_up, nothing is given up"
@@ -329,7 +328,7 @@ def test_a_step_answers_while_it_beats_and_an_answer_that_is_no_json_as_its_erro
     (tmp_path / "component.toml").write_text(ODD, encoding="utf-8")
     (tmp_path / "__init__.py").write_text(ODD_INIT, encoding="utf-8")
     comp = runner.load(tmp_path)
-    monkeypatch.setattr(runner, "BEAT", 0.05)
+    monkeypatch.setattr(runner, "BEAT", 0.02)
     peer = Peer()
     run = runner.Runner(comp, peer, "odd")  # type: ignore[arg-type]
     sent: list[dict] = []
@@ -337,7 +336,7 @@ def test_a_step_answers_while_it_beats_and_an_answer_that_is_no_json_as_its_erro
     def respond(msg, data) -> None:  # a slow answer, encoded as Peer.publish encodes it
         data = json.dumps(data) if isinstance(data, (dict, list)) else data
         before = len(peer.sent)
-        time.sleep(0.3)
+        time.sleep(0.12)
         assert len(peer.sent) > before, "the runner beats until the answer is out"
         sent.append(json.loads(data))
 
@@ -369,7 +368,7 @@ def test_an_answer_the_bus_refuses_is_said_so_the_core_fails_the_step_at_once(
     run = runner.Runner(comp, peer, "drip")  # type: ignore[arg-type]
     for reply, call in (("_INBOX.core.1", "1"), ("_INBOX.core.2", "2")):
         run._handle(Msg("cmd.drip." + token("drip talk"), reply,
-                        json.dumps({"call": call, "step": 1, "args": []}).encode()))
+                        json.dumps({"call": call, "step": 1, "args": ["0"]}).encode()))
 
     assert [reply for reply, _ in peer.answered] == ["_INBOX.core.1", "_INBOX.core.2"]
     refused = [(subject, body) for subject, body in peer.sent if "refused" in body]

@@ -150,10 +150,10 @@ func TestAStepWaitsForTheToolUseThatMatchesIt(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	select {
-	case c := <-done:
-		t.Fatalf("the step is answered by another call: %+v", c)
-	case <-time.After(200 * time.Millisecond):
+	// A tool use that answers a step drops it from the outbox before Hear
+	// returns, so the outbox shows at once whether another use answered it.
+	if !strings.Contains(g.Outbox(), "merge_pull_request") {
+		t.Fatalf("the step is answered by another call: the outbox tells %q", g.Outbox())
 	}
 	if err := ix.Hear(github.PostToolUse, toolUse("mcp__0f1e__merge_pull_request",
 		map[string]any{"owner": "Alice", "repo": "demo", "pullNumber": "8", "merge_method": "squash", "commit_message": "edited", "commit_title": "t"},
