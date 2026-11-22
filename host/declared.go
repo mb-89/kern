@@ -199,7 +199,7 @@ func (r remote) Serve(ctx context.Context, verb string, req json.RawMessage) (js
 	}
 	call := fmt.Sprintf("%d", r.c.asks.Add(1))
 	data, _ := json.Marshal(map[string]any{"call": call, "request": req})
-	ctx, cancel := context.WithTimeout(ctx, VerbWait)
+	ctx, cancel := Within(ctx, r.c.o.Clock, VerbWait)
 	defer cancel()
 	subject := bus.IOVerb + bus.Subject(r.inst) + "." + bus.Token(verb)
 	m, err := r.c.nc.RequestWithContext(ctx, subject, data)

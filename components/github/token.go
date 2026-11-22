@@ -1,6 +1,7 @@
 package github
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"kern/host"
 )
 
 // attempts is how often a read is sent before a rate limit fails it.
@@ -20,6 +23,10 @@ const attempts = 4
 // at least a minute.
 const secondaryWait = time.Minute
 
+// RequestWait is the longest one REST request may take, its body read
+// included, measured against the component's clock.
+const RequestWait = 30 * time.Second
+
 // rest is the token backend's REST client. It keeps each path's ETag and
 // body, so a read of an unchanged one answers 304 and costs no quota, and
 // one pace: after a rate limit, every read waits until it lifts.
@@ -27,7 +34,7 @@ type rest struct {
 	api, token string
 	client     *http.Client
 	sleep      func(time.Duration)
-	now        func() time.Time
+	clock      host.Clock
 	paceMax    time.Duration
 
 	mu    sync.Mutex
@@ -109,7 +116,7 @@ func (c *rest) get(path string) (any, error) {
 func (c *rest) page(path string) (any, bool, error) {
 	for attempt := 1; ; attempt++ {
 		c.mu.Lock()
-		wait := c.until.Sub(c.now())
+		wait := c.until.Sub(c.clock.Now())
 		prev, held := c.cache[path]
 		c.mu.Unlock()
 		if wait > 0 {
@@ -118,8 +125,10 @@ func (c *rest) page(path string) (any, bool, error) {
 			}
 			c.sleep(wait)
 		}
-		req, err := http.NewRequest(http.MethodGet, c.api+path, nil)
+		ctx, cancel := host.Within(context.Background(), c.clock, RequestWait)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.api+path, nil)
 		if err != nil {
+			cancel()
 			return nil, false, err
 		}
 		req.Header.Set("Accept", "application/vnd.github+json")
@@ -130,10 +139,12 @@ func (c *rest) page(path string) (any, bool, error) {
 		}
 		resp, err := c.client.Do(req)
 		if err != nil {
+			cancel()
 			return nil, false, fmt.Errorf("GET %s: %w", path, err)
 		}
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		cancel()
 		if err != nil {
 			return nil, false, fmt.Errorf("GET %s: %w", path, err)
 		}
@@ -161,7 +172,7 @@ func (c *rest) page(path string) (any, bool, error) {
 			return nil, false, fmt.Errorf("GET %s: %s, rate limited %d times", path, resp.Status, attempts)
 		}
 		c.mu.Lock()
-		if until := c.now().Add(pace); until.After(c.until) {
+		if until := c.clock.Now().Add(pace); until.After(c.until) {
 			c.until = until
 		}
 		c.mu.Unlock()
@@ -184,7 +195,7 @@ func (c *rest) limit(resp *http.Response) (time.Duration, bool) {
 	}
 	if h.Get("X-RateLimit-Remaining") == "0" {
 		if reset, err := strconv.ParseInt(h.Get("X-RateLimit-Reset"), 10, 64); err == nil {
-			if d := time.Unix(reset, 0).Sub(c.now()); d > 0 {
+			if d := time.Unix(reset, 0).Sub(c.clock.Now()); d > 0 {
 				return d, true
 			}
 			return 0, true

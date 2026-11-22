@@ -208,7 +208,7 @@ func New(o Options) *GitHub {
 		o.Token = FindToken
 	}
 	if o.Client == nil {
-		o.Client = &http.Client{Timeout: 30 * time.Second}
+		o.Client = &http.Client{} // each request's limit is RequestWait, on Clock
 	}
 	if o.Sleep == nil {
 		clk := o.Clock
@@ -339,7 +339,7 @@ func (g *GitHub) start(instance string, read index.Reader, commit index.Commit) 
 	g.instance, g.commit, g.backend, g.fresh, g.wait = instance, commit, backend, refresh, wait
 	g.stepWait, g.tellWait = stepWait, tellWait
 	if backend == Token {
-		g.rest = &rest{api: strings.TrimSuffix(str("api"), "/"), token: token, client: g.o.Client, sleep: g.o.Sleep, now: g.o.Clock.Now, paceMax: paceMax, cache: map[string]cached{}}
+		g.rest = &rest{api: strings.TrimSuffix(str("api"), "/"), token: token, client: g.o.Client, sleep: g.o.Sleep, clock: g.o.Clock, paceMax: paceMax, cache: map[string]cached{}}
 	}
 	g.mu.Unlock()
 	if err := commit(backendOut.Set(backend)); err != nil {

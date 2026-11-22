@@ -446,7 +446,7 @@ func (d *door) call(ctx context.Context, t Tool, raw json.RawMessage) *sdk.CallT
 }
 
 func (d *door) run(ctx context.Context, command string, args []string) (host.CallAnswer, error) {
-	ctx, cancel := context.WithTimeout(ctx, callWait)
+	ctx, cancel := host.Within(ctx, d.o.Clock, callWait)
 	defer cancel()
 	return d.o.Core.Call(ctx, command, args)
 }
