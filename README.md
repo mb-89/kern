@@ -29,6 +29,7 @@ named in the design's plan.
 | `python/tests/` | the Python fake's leg of the contract suite and the sample component's test, run by `se.toml` `[tests.beside.python]` | |
 | `release.toml` | kern's version and the one URL its release is published under ([Release](#release)) | |
 | `tools/release/` | builds the release: six archives and `SHA256SUMS` | |
+| `tools/expect/` | `pending`: lists the pending expectations per claimer ([Pending expectations](#pending-expectations)) | |
 | `template/` | the bare application every new application starts from ([The template](#the-template)) | |
 
 The NATS server is a Go dependency, `github.com/nats-io/nats-server/v2` v2.11.9 with
