@@ -206,9 +206,14 @@ go vet ./... && go test ./...
 kern's `se.toml` declares its tests, with their time and budget (SE's README "Test budget"):
 `[tests]` is kern's Go tests, and beside them `[tests.beside.python]` the Python SDK's tests
 (`python/tests`, pytest through uv from the root's `pyproject.toml`), `[tests.beside.template]`
-the template's, `[tests.beside.long-step]` and `[tests.beside.release-guard]` (below).
+the template's, and `[tests.beside.release-guard]` (below).
 `work_tickets.py suite --worktree .`, SE's suite command at kern's SE pin, runs them all, and
 `integrate` runs the same, so a red test refuses the integration.
+
+No test waits on the wall clock. A time limit under test (a step wait, a reply's expiry, a hang-up,
+a beat) is shortened to milliseconds through the core's options or its `KERN_*` variables, or the
+case reads a fake clock or the state that settles it instead; a deadline only bounds a wait for
+something that happens at once where the test passes.
 
 `.github/workflows/check.yml` is the check `main`'s ruleset requires, `check`. Its job `check`
 gates the commits with SE's public check, holds a pull request to the work model's issue rule and
@@ -225,14 +230,12 @@ The contract suite runs `contract/cases.json` three times: against the Go fake
 (`contract/real_test.go`, Python 3.11 or later, from `KERN_PYTHON` or the path), and against the
 Python fake (`python/tests/`, `se.toml` `[tests.beside.python]`, which needs no Go).
 
-One case waits for real: `contract/longstep_test.go`, behind the build tag `longstep`, asks a relay
-step after a local phase of 130 s, longer than NATS's two minutes, the one limit on the path that
-no fake clock reaches. `go test ./...` leaves it out; the suite runs it beside as `se.toml`
-`[tests.beside.long-step]` (`go test -tags longstep -run TestAStepAnswersAfterALongLocalPhase
-./contract/`), nightly and where a change touches the `paths` it guards.
-
-Its fast guards run in `go test ./...`, in milliseconds: `bus/expiry_test.go` holds that an
-instance's reply permission never expires where the core sets no reply wait, and
+The long-step case, `contract/longstep_test.go`, asks a relay step after a local phase longer than
+the server's expiry of a reply permission, NATS's two minutes, the one limit on the path that no
+fake clock reaches. It runs in `go test ./...` in under a second: `KERN_REPLY_DEFAULT` (`cli`)
+shortens that expiry to 150 ms and the phase works 0.3 s, so the answer the bus refused on 14 Nov
+is refused again with the fix reverted. Its fast guards, in milliseconds: `bus/expiry_test.go` holds
+that an instance's reply permission never expires where the core sets no reply wait, and
 `host/refused_test.go` that a step whose answer the bus refused fails at once.
 
 ## Release

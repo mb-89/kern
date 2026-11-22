@@ -9,10 +9,10 @@ drip = component("drip")
 
 @drip.command("drip talk")
 def talk(args, inputs, say):
-    count = int(args[0])
+    count, apart = int(args[0]), float(args[1])
     for i in range(1, count + 1):
         say(f"tick {i}")
-        time.sleep(0.25)
+        time.sleep(apart)
     return f"said {count} lines"
 
 

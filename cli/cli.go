@@ -58,6 +58,12 @@ const StepWaitEnv = "KERN_STEP_WAIT"
 // to show that an answer the bus refuses fails the step at once.
 const ReplyWaitEnv = "KERN_REPLY_WAIT"
 
+// ReplyDefaultEnv names a duration that replaces NATS's own expiry of a reply
+// permission that names none, two minutes, in a served core's bus
+// (host.Options.ReplyDefault): a test's way to show in under a second that a
+// step answers after a local phase longer than that expiry.
+const ReplyDefaultEnv = "KERN_REPLY_DEFAULT"
+
 func rootFlag(fs *flag.FlagSet) {
 	fs.String("root", "", "the checkout the core serves")
 }
@@ -328,9 +334,17 @@ func serve(name, root, home string, grace, idle time.Duration, stdout, stderr io
 		}
 		replyWait = d
 	}
+	var replyDefault time.Duration
+	if v := os.Getenv(ReplyDefaultEnv); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return die(fmt.Sprintf("%s serve: %s=%q is no duration, such as 60s", name, ReplyDefaultEnv, v))
+		}
+		replyDefault = d
+	}
 	core, err := host.Serve(host.Options{
 		Root: root, Home: homeOf(root, source), Wiring: w, Components: index.Registered(), Grace: grace, Idle: idle, Log: stderr,
-		StepWait: stepWait, ReplyWait: replyWait,
+		StepWait: stepWait, ReplyWait: replyWait, ReplyDefault: replyDefault,
 	})
 	if err != nil {
 		return die(err.Error())

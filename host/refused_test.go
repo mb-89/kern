@@ -26,10 +26,10 @@ help = "Its answer is refused by the bus."
 class = "batch"
 `
 
-// The fast guard of the long step (contract/longstep_test.go, beside the
-// suite): where the runner says the bus refused its answer, {"refused"} on
-// say.<i>.<call>, the core fails the step at once, naming the refusal, and
-// never waits out its step wait of a minute in silence.
+// The fast guard of the long step (contract/longstep_test.go): where the
+// runner says the bus refused its answer, {"refused"} on say.<i>.<call>, the
+// core fails the step at once, naming the refusal, and never waits out its
+// step wait of a minute in silence.
 func TestAStepWhoseAnswerTheBusRefusedFailsAtOnce(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

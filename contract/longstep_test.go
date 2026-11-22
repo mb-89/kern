@@ -1,5 +1,3 @@
-//go:build longstep
-
 package contract
 
 import (
@@ -19,19 +17,22 @@ import (
 	"kern/index"
 )
 
-// LongGap is the fixture's local phase: longer than NATS's own expiry of a
-// reply permission, two minutes, the one limit on the path a step that beats
-// still runs into (kern/README.md "Tests"). It runs only with the build tag
-// longstep, beside the suite (SE's se.toml [tests.beside.kern-long-step]).
-const LongGap = "130"
+// The long step's limit, shortened (README.md "Tests"): replyDefault replaces
+// NATS's own expiry of a reply permission that names none, two minutes, the
+// one limit on the path a step that beats still runs into, and the fixture's
+// local phase, gap seconds, is just longer.
+const (
+	replyDefault = "150ms"
+	gap          = "0.3"
+)
 
 // A landing's shape against the real core, with the test as the session's
 // host: a command in Python asks a GitHub step through kern's relay, the host
-// answers it through the PostToolUse hook, the command works LongGap seconds
-// without a word but its beats, and asks the next step. That step reaches the
-// relay's outbox and the hook, and the call lands. Before the bus took the
-// reply's expiry off, the answer of the long step was refused and the call
-// waited out its step wait in silence, as two landings did on 14 Nov.
+// answers it through the PostToolUse hook, the command works gap seconds,
+// longer than the server's expiry of a reply permission, without a word but
+// its beats, and asks the next step. That step reaches the relay's outbox and
+// the hook, and the call lands. Before the bus took the reply's expiry off,
+// the answer of the long step was refused, as two landings' were on 14 Nov.
 func TestAStepAnswersAfterALongLocalPhase(t *testing.T) {
 	root := checkout(t)
 	dir := filepath.Join(root, "components", "gap")
@@ -56,8 +57,7 @@ func TestAStepAnswersAfterALongLocalPhase(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, index.WiringFile), []byte(wiring), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// A step wait of 30 s: the silent wait the lost answer ended in, short enough to fail fast.
-	env := []string{"PYTHONPATH=" + sdk(t), "PYTHONDONTWRITEBYTECODE=1", cli.StepWaitEnv + "=30s"}
+	env := []string{"PYTHONPATH=" + sdk(t), "PYTHONDONTWRITEBYTECODE=1", cli.ReplyDefaultEnv + "=" + replyDefault}
 	want(t, run(t, env, "start", "--root", root), 0, "kern: started")
 	want(t, run(t, nil, "status", "--root", root, "--wait", wait), 0, "kern: running")
 	s := standing(t, root)
@@ -73,7 +73,7 @@ func TestAStepAnswersAfterALongLocalPhase(t *testing.T) {
 	}
 	done := make(chan answered, 1)
 	go func() {
-		m, err := client.Request(bus.Call+bus.Token("gap run"), []byte(`{"args":["`+LongGap+`"]}`), 10*time.Minute)
+		m, err := client.Request(bus.Call+bus.Token("gap run"), []byte(`{"args":["`+gap+`"]}`), time.Minute)
 		var a host.CallAnswer
 		if err == nil {
 			err = json.Unmarshal(m.Data, &a)
@@ -85,14 +85,14 @@ func TestAStepAnswersAfterALongLocalPhase(t *testing.T) {
 	for {
 		select {
 		case got := <-done:
-			if got.err != nil || got.a.Error != "" || !strings.Contains(got.a.Text, "heard list_issues after "+LongGap+" s") {
+			if got.err != nil || got.a.Error != "" || !strings.Contains(got.a.Text, "heard list_issues after "+gap+" s") {
 				t.Fatalf("gap run answers %+v (%v) after the steps %q; the step after the long phase wants to reach the hook", got.a, got.err, ran)
 			}
 			if strings.Join(ran, " ") != "issue_read list_issues" {
 				t.Fatalf("the host ran %q, and wants issue_read, then list_issues", ran)
 			}
 			return
-		case <-time.After(time.Second):
+		case <-time.After(10 * time.Millisecond):
 		}
 		var told struct {
 			Out struct {
