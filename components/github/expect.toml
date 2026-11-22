@@ -1,0 +1,32 @@
+# What the GitHub component claims (README.md "Expectations"): the names it writes and the requests
+# it answers. Its tests meet every expectation pooled under them against its fake REST server
+# (hot_test.go), and its hot test meets them against GitHub itself and records each real answer
+# beside the expectation it met (README.md "Hot tests").
+
+[[claim]]
+name = "github.issues"
+port = "issues"
+
+[[claim]]
+name = "github.issue"
+verb = "issue"
+
+[[claim]]
+name = "github.pull"
+verb = "pull"
+
+[[claim]]
+name = "github.check-runs"
+verb = "check-runs"
+
+[[claim]]
+name = "github.comment-list"
+verb = "comment-list"
+
+[[claim]]
+name = "github.issue-list"
+verb = "issue-list"
+
+[[claim]]
+name = "github.pull-list"
+verb = "pull-list"
