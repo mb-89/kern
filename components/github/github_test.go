@@ -76,14 +76,15 @@ type nowClock func() time.Time
 func (n nowClock) Now() time.Time                       { return n() }
 func (nowClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
 
-// beat is the clock's second as the case writes it (components/clock): an
-// I/O component whose one output the wiring binds to beat/second.
+// beat is the clock's second as the case writes it (components/clock), a
+// count that counts up: an I/O component whose one output the wiring binds
+// to beat/second.
 type beat struct {
 	component *index.Component
 	commit    index.Commit
 }
 
-var secondOut = index.Output("second", time.Time{}, "The clock's second, as the case writes it.")
+var secondOut = index.Output("second", 0, "The clock's second, a count, as the case writes it.")
 
 func newBeat() *beat {
 	b := &beat{}
@@ -92,10 +93,10 @@ func newBeat() *beat {
 	return b
 }
 
-// at commits the second at.
-func (b *beat) at(t *testing.T, at time.Time) {
+// at commits the second's count.
+func (b *beat) at(t *testing.T, count int) {
 	t.Helper()
-	if err := b.commit(secondOut.Set(at)); err != nil {
+	if err := b.commit(secondOut.Set(count)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -328,10 +329,10 @@ func TestTheTokenBackendReadsAPullsCheckRuns(t *testing.T) {
 }
 
 // The refresh reads each snapshot the token holds again, with its ETag, and
-// a changed answer moves the snapshot. It runs on the clock's second: the
-// case writes the second itself, and the relay holds the refresh back until
-// refresh, 2m, has passed on that second since the first one; no case waits
-// on the wall clock.
+// a changed answer moves the snapshot. It runs on the clock's second, a
+// count: the case writes the count itself, and the relay holds the refresh
+// back until refresh, 2m, has passed in counts since the first one, 120; no
+// case waits on the wall clock.
 func TestTheRefreshReadsEverySnapshotAgain(t *testing.T) {
 	t.Parallel()
 	f, srv := newFake(t)
@@ -349,14 +350,14 @@ func TestTheRefreshReadsEverySnapshotAgain(t *testing.T) {
 	f.bodies["/repos/alice/demo/issues/7"] = `{"number": 7, "title": "One issue, renamed", "state": "closed"}`
 	f.mu.Unlock()
 	reads := func() string { _, answered := f.log(); return fmt.Sprint(answered) }
-	for _, at := range []time.Duration{0, time.Second, time.Minute, 2*time.Minute - time.Second} {
-		b.at(t, nine.Add(at))
+	for _, count := range []int{5, 6, 65, 124} {
+		b.at(t, count)
 		if got := reads(); got != "[200]" {
-			t.Fatalf("at the second +%v GitHub answered %v, and wants no refresh before 2m: [200]", at, got)
+			t.Fatalf("at the second %d GitHub answered %v, and wants no refresh before 120 counts from 5: [200]", count, got)
 		}
 	}
 	clk.move(2 * time.Minute)
-	b.at(t, nine.Add(2*time.Minute))
+	b.at(t, 125)
 	s := snapshot(t, ix, "github/issues/alice.demo.7")
 	if s.Read != nine.Add(2*time.Minute) || s.Data.(map[string]any)["title"] != "One issue, renamed" {
 		t.Fatalf("after the refresh the snapshot is %+v", s)
@@ -364,9 +365,9 @@ func TestTheRefreshReadsEverySnapshotAgain(t *testing.T) {
 	if got := reads(); got != "[200 200]" {
 		t.Fatalf("GitHub answered %v, and wants the changed issue read again: [200 200]", got)
 	}
-	b.at(t, nine.Add(3*time.Minute))
+	b.at(t, 185)
 	if got := reads(); got != "[200 200]" {
-		t.Fatalf("a second 1m after the refresh refreshed again: GitHub answered %v", got)
+		t.Fatalf("a second 60 counts after the refresh refreshed again: GitHub answered %v", got)
 	}
 }
 
@@ -383,8 +384,8 @@ func TestNoSecondOrNoRefreshRefreshesNothing(t *testing.T) {
 	if _, err := ix.Call("read", "issue", "alice", "demo", "7"); err != nil {
 		t.Fatal(err)
 	}
-	for _, at := range []time.Duration{0, time.Hour, 2 * time.Hour} {
-		b.at(t, nine.Add(at))
+	for _, count := range []int{0, 3600, 7200} {
+		b.at(t, count)
 	}
 	if _, answered := f.log(); fmt.Sprint(answered) != "[200]" {
 		t.Fatalf("a refresh of 0s refreshed: GitHub answered %v", answered)

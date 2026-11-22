@@ -134,7 +134,7 @@ func TestTheTokenBackendListsEveryPageWithETags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b.at(t, nine)
+	b.at(t, 0)
 	r, err := ix.Call("list", "issues", "Alice", "demo", "", "work")
 	if err != nil || r.Text != "[12 9], read 2026-11-13T09:00:00Z via token" {
 		t.Fatalf("list issues answers %q, %v, and wants both pages without the pull request", r.Text, err)
@@ -155,7 +155,7 @@ func TestTheTokenBackendListsEveryPageWithETags(t *testing.T) {
 	}
 	_, before := f.log()
 	clk.move(2 * time.Minute)
-	b.at(t, nine.Add(2*time.Minute))
+	b.at(t, 120)
 	asked, answered := f.log()
 	if again := fmt.Sprint(answered[len(before):]); again != "[304 304 304 304 304]" {
 		t.Fatalf("the refresh was answered %v, and wants every page of the three reads 304: asked %q", again, asked[len(before):])

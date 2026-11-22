@@ -584,8 +584,8 @@ func (p reactsPart) declare(c *Component) {
 
 // Reacts declares that an I/O component runs fn when a name its input struct
 // In reads changes, as a derivation runs for its inputs; it is how a component
-// that acts on time runs: it reads the clock's tick or second
-// (components/clock) and keeps its own interval with a clock.Relay, so no
+// that acts on time runs: it reads a counter of the clock, such as its
+// second (components/clock), and keeps its own interval with a clock.Relay, so no
 // component keeps a timer of its own. The index calls fn after the commit
 // that changed the name, outside its lock, in the committer's goroutine, with
 // the instance's name and its inputs as they stand: fn returns quickly and

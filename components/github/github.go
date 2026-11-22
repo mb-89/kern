@@ -348,19 +348,22 @@ func (g *GitHub) start(instance string, read index.Reader, commit index.Commit) 
 	return nil
 }
 
-// second is the component's reaction to the clock's second (components/clock):
-// its relay returns at once until refresh has passed on that clock since the
-// last refresh, and then the token backend's refresh runs, on its own, unless
-// the last one still runs. The relay reads nothing it would refresh.
+// second is the component's reaction to the clock's second, a count that
+// counts up (components/clock): its relay returns at once until refresh, in
+// whole seconds and at least one, has passed in counts since the last
+// refresh, and then the token backend's refresh runs, on its own, unless the
+// last one still runs. A wiring that leaves second built-in reads 0 for good,
+// and refreshes nothing.
 func (g *GitHub) second(_ string, in struct {
-	Second time.Time `index:"second"`
+	Second int `index:"second"`
 }) {
-	if in.Second.IsZero() {
-		return // a wiring that leaves the second built-in refreshes nothing
-	}
 	g.mu.Lock()
-	backend, every := g.backend, g.fresh
+	backend, refresh := g.backend, g.fresh
 	g.mu.Unlock()
+	every := 0
+	if refresh > 0 {
+		every = max(1, int(refresh/time.Second))
+	}
 	if backend != Token || !g.relay.Due(in.Second, every) {
 		return
 	}

@@ -18,7 +18,7 @@ import (
 // timer of its own. The check refuses a time.Tick, a time.NewTicker or a
 // time.AfterFunc in any Go file of kern, its tests among them, outside the
 // clock component and the host's clock: a component that acts on time reads
-// the clock's tick or second (index.Reacts) and keeps its interval with a
+// a counter of the clock, such as its second (index.Reacts), and keeps its interval with a
 // clock.Relay, and a wait for an answer waits on host.Clock.
 
 // timerFuncs are the functions of package time that start a timer of their own.
@@ -95,7 +95,7 @@ func TestNoTimerOutsideTheClock(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(found) > 0 {
-		t.Fatalf("a timer of its own outside the clock (components/clock/README.md): read the clock's tick or second with index.Reacts and a clock.Relay, or wait on host.Clock:\n  %s", strings.Join(found, "\n  "))
+		t.Fatalf("a timer of its own outside the clock (components/clock/README.md): read a counter of the clock, such as clock.second, with index.Reacts and a clock.Relay, or wait on host.Clock:\n  %s", strings.Join(found, "\n  "))
 	}
 }
 
