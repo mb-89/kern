@@ -605,4 +605,22 @@ func TestAHookDeniesAWriteToAManagedFileInEachHostsFormat(t *testing.T) {
 	if out, _, code := hook("preToolUse", `{"sessionId":"s1","cwd":`+string(cwd)+`,"toolName":"bash","toolArgs":"{\"command\":\"echo x > notes.md\"}"}`); out != "" || code != 0 {
 		t.Fatalf("a Copilot bash write outside the managed folders prints %q with exit code %d, and wants nothing with 0", out, code)
 	}
+	// A Grep over the managed folder is answered from the model once the
+	// watcher reported the start's cookie; until then it passes to the disk.
+	if err := os.WriteFile(filepath.Join(root, "docs", "b.md"), []byte("needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	docs, _ := json.Marshal(filepath.Join(root, "docs"))
+	grep := `{"session_id":"s1","tool_name":"Grep","tool_input":{"pattern":"needle","path":` + string(docs) + `},"cwd":` + string(cwd) + `}`
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		out, _, code := hook("PreToolUse", grep)
+		if code == 2 && strings.Contains(out, "warm model") && strings.Contains(out, "b.md") {
+			break
+		}
+		if code != 0 && code != 2 || time.Now().After(deadline) {
+			t.Fatalf("a Grep over the managed folder prints %q with exit code %d, and wants its answer from the model", out, code)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }

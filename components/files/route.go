@@ -16,7 +16,8 @@ const own = ".se"
 
 // guard is the lean routing of the agent's tools (README.md "Agent tools"): a
 // host's PreToolUse that writes a managed file is refused, naming the
-// module's tools; every other call passes.
+// module's tools; a Grep or a Glob over a managed folder is answered from the
+// model (answerSearch); every other call passes.
 func (f *Files) guard(_, event string, payload []byte) string {
 	if event != host.PreToolUse && event != host.PreToolUseCamel {
 		return ""
@@ -33,7 +34,7 @@ func (f *Files) guard(_, event string, payload []byte) string {
 	if refused := f.refusedWrites(call); len(refused) > 0 {
 		return f.writeRemedy(call, refused)
 	}
-	return ""
+	return f.answerSearch(call)
 }
 
 // refusedWrites answers the managed files and folders the call writes,

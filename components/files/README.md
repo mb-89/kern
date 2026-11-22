@@ -96,6 +96,12 @@ writes is `host.ToolCall.Writes`, from Claude Code's and the Copilot CLI's tools
 command ([kern's README "Agent tools"](../../README.md#agent-tools)). Writes into kern's own folder
 `.se/` always pass, and without a started instance nothing is refused.
 
+The guard also answers a Grep or a Glob over a managed folder from the model, as the deny's reason,
+so the native tool does not run; on any doubt (an unwatched model, a scope past the managed
+folders, an argument or pattern it does not answer, a file held by hash alone that a Grep would
+read, more than 1000 answers) it lets the native tool read the disk
+([kern's README "Searches answered from the model"](../../README.md#searches-answered-from-the-model)).
+
 ## In step with the disk
 
 Reused from quackitect v4 (`src/engine/indexwatch.go`) and v5 (`src/modules/files/watch.go`):
@@ -143,7 +149,9 @@ a temporary folder, so no case waits for the disk to be noticed. Each case prove
   command, naming the tools, and a write elsewhere, a read, `.se/` and another event pass
   (`route_test.go`);
 - the door's commands read, edit, write and remove through the model, refuse a stale version, and
-  the door serves them as `files` and `files_write`.
+  the door serves them as `files` and `files_write`;
+- Grep and Glob over a managed folder answer from the model in both hosts' formats, and a search
+  in doubt passes.
 
 One case starts the module on a wiring with the operating system's watcher, and a hand edit on the
 real disk reaches its name. Its outside thing is the disk, so the normal suite's run against a

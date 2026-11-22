@@ -195,3 +195,126 @@ func TestTheDoorCommandsWriteThroughTheModel(t *testing.T) {
 		t.Fatalf("the door serves %v, and wants files read in files and the writes in files_write", served)
 	}
 }
+
+// searched is a started instance over a docs folder the model holds and a
+// notes folder it does not, watched.
+func searched(t *testing.T, config map[string]any) (*setup, string) {
+	t.Helper()
+	root := t.TempDir()
+	for rel, content := range map[string]string{"docs/a.md": "alpha\nbeta\n", "docs/sub/b.txt": "Beta gamma\nbeta\n", "notes/n.md": "beta\n"} {
+		abs := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if config == nil {
+		config = map[string]any{}
+	}
+	config["folders"] = []string{"docs"}
+	s := started(t, root, config)
+	s.watched("docs")
+	return s, root
+}
+
+// Grep and Glob over a managed folder are answered from the model, in both
+// hosts' formats, as the native tool answers them: the files, the lines or the
+// counts; a change on the disk the watcher has not handed yet is not seen.
+func TestASearchOverAManagedFolderIsAnsweredFromTheModel(t *testing.T) {
+	t.Parallel()
+	s, root := searched(t, nil)
+	docs := filepath.Join(root, "docs")
+	a, b := filepath.Join(docs, "a.md"), filepath.Join(docs, "sub", "b.txt")
+	s.put("docs/a.md", "unheard\n") // on the disk, not yet handed by the watcher
+	guard := func(event string, payload []byte) string { return s.files.Component.Guard("files", event, payload) }
+	for _, c := range []struct {
+		name, event string
+		payload     []byte
+		want        []string
+		not         []string
+	}{
+		{"Claude Code's Grep", host.PreToolUse, claudeCall("Grep", map[string]any{"pattern": "beta", "path": docs}, root),
+			[]string{"from its warm model", "Found 2 files", a, b}, []string{"unheard"}},
+		{"its content mode", host.PreToolUse, claudeCall("Grep", map[string]any{"pattern": "^beta", "path": docs, "output_mode": "content", "-n": true}, root),
+			[]string{a + ":2:beta", b + ":2:beta"}, []string{"Beta gamma"}},
+		{"its count mode, case folded", host.PreToolUse, claudeCall("Grep", map[string]any{"pattern": "beta", "path": "docs", "output_mode": "count", "-i": true}, root),
+			[]string{a + ":1", b + ":2"}, nil},
+		{"its glob filter", host.PreToolUse, claudeCall("Grep", map[string]any{"pattern": "beta", "path": docs, "glob": "*.txt"}, root),
+			[]string{"Found 1 file", b}, []string{a}},
+		{"a Grep of one managed file", host.PreToolUse, claudeCall("Grep", map[string]any{"pattern": "alpha", "path": a}, root),
+			[]string{"Found 1 file", a}, nil},
+		{"a Grep that finds nothing", host.PreToolUse, claudeCall("Grep", map[string]any{"pattern": "omega", "path": docs}, root),
+			[]string{"No files found"}, nil},
+		{"Copilot's grep", host.PreToolUseCamel, copilotCall("grep", map[string]any{"pattern": "gamma", "path": "docs"}, root),
+			[]string{"Found 1 file", b}, nil},
+		{"Claude Code's Glob", host.PreToolUse, claudeCall("Glob", map[string]any{"pattern": "**/*.txt", "path": docs}, root),
+			[]string{b}, []string{a}},
+		{"a Glob from the root into a managed folder", host.PreToolUse, claudeCall("Glob", map[string]any{"pattern": "docs/**/*.md"}, root),
+			[]string{a}, []string{b}},
+		{"Copilot's glob", host.PreToolUseCamel, copilotCall("glob", map[string]any{"pattern": "docs/*.md"}, root),
+			[]string{a}, []string{b}},
+	} {
+		reason := guard(c.event, c.payload)
+		for _, want := range c.want {
+			if !strings.Contains(reason, want) {
+				t.Errorf("%s answers %q, and wants it to hold %q", c.name, reason, want)
+			}
+		}
+		for _, not := range c.not {
+			if strings.Contains(reason, not) {
+				t.Errorf("%s answers %q, which holds %q", c.name, reason, not)
+			}
+		}
+	}
+}
+
+// On any doubt a search passes, so the native tool reads the disk: a scope
+// beyond the managed folders, an option or a pattern the model does not
+// answer, a file it holds by hash alone, and a model that is not watched.
+func TestASearchInDoubtPassesToTheDisk(t *testing.T) {
+	t.Parallel()
+	s, root := searched(t, nil)
+	docs := filepath.Join(root, "docs")
+	for _, c := range []struct {
+		name    string
+		payload []byte
+	}{
+		{"a Grep of the whole checkout", claudeCall("Grep", map[string]any{"pattern": "beta"}, root)},
+		{"a Grep outside the managed folders", claudeCall("Grep", map[string]any{"pattern": "beta", "path": filepath.Join(root, "notes")}, root)},
+		{"a Grep with context lines", claudeCall("Grep", map[string]any{"pattern": "beta", "path": docs, "-A": 2}, root)},
+		{"a Grep by file type", claudeCall("Grep", map[string]any{"pattern": "beta", "path": docs, "type": "md"}, root)},
+		{"a Grep across lines", claudeCall("Grep", map[string]any{"pattern": "a\\nb", "path": docs, "multiline": true}, root)},
+		{"a pattern Go's regexp does not take", claudeCall("Grep", map[string]any{"pattern": "(?<=a)b", "path": docs}, root)},
+		{"a Glob with braces", claudeCall("Glob", map[string]any{"pattern": "**/*.{md,txt}", "path": docs}, root)},
+		{"a Glob beyond the managed folders", claudeCall("Glob", map[string]any{"pattern": "**/*.md"}, root)},
+		{"a Glob outside them", claudeCall("Glob", map[string]any{"pattern": "notes/*.md"}, root)},
+	} {
+		if reason := s.files.Component.Guard("files", host.PreToolUse, c.payload); reason != "" {
+			t.Errorf("%s answers %q, and wants it to pass", c.name, reason)
+		}
+	}
+
+	big, root := searched(t, map[string]any{"content-limit": 8})
+	if reason := big.files.Component.Guard("files", host.PreToolUse, claudeCall("Grep", map[string]any{"pattern": "beta", "path": filepath.Join(root, "docs")}, root)); reason != "" {
+		t.Errorf("a Grep over a file held by hash alone answers %q, and wants it to pass", reason)
+	}
+	if reason := big.files.Component.Guard("files", host.PreToolUse, claudeCall("Glob", map[string]any{"pattern": "*.md", "path": filepath.Join(root, "docs")}, root)); !strings.Contains(reason, "a.md") {
+		t.Errorf("a Glob, which reads no content, answers %q over a file held by hash alone, and wants it answered", reason)
+	}
+
+	unwatched, uroot := func() (*setup, string) {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		s := started(t, root, map[string]any{"folders": []string{"docs"}})
+		s.clock.fire <- time.Time{} // the cookie's wait ends unheard
+		s.settle()
+		return s, root
+	}()
+	if reason := unwatched.files.Component.Guard("files", host.PreToolUse, claudeCall("Glob", map[string]any{"pattern": "*", "path": filepath.Join(uroot, "docs")}, uroot)); reason != "" {
+		t.Errorf("a Glob over an unwatched model answers %q, and wants it to pass", reason)
+	}
+}

@@ -259,7 +259,8 @@ The component's [README](components/files/README.md) is its contract.
 
 The person's decision of 22 Nov (deck "Files, templates and agent tools", lean routing): kern
 refuses only a write to a managed file, naming the way to do it, and answers a search over a
-managed folder from the warm model; every other tool call passes. It does so through the hook every
+managed folder from the warm model; every other tool call passes, and with kern down every one
+does. It does so through the hook every
 host the person uses runs before a tool, never a path only one host has.
 
 > Just understand that we're not only using Claude Code. We're also using Copilot, and the hooks
@@ -285,6 +286,29 @@ one, naming the files and its tools `files` and `files_write` (`files read`, the
   refuses only what it knows, and the watcher and compare-and-swap keep the model right past it.
 - **Everything else passes:** reads, files outside the managed folders, kern's own folder `.se/`,
   every event but `PreToolUse`, and every call while no files instance runs.
+
+### Searches answered from the model
+
+A Grep or a Glob over a managed folder (Claude Code's, the Copilot CLI's `grep`, `rg` and `glob`)
+is answered from the warm model as the deny's reason, which says it is the search's result and not
+an error, so the native tool does not run (`files` `answerSearch`, [its
+README](components/files/README.md#the-guard)):
+
+- **Grep** answers, as the native tool does, the files that match (`Found N files` and their
+  paths, its default), their lines (`output_mode` `content`, `path:line:text`) or their counts
+  (`count`), with `-i`, `glob` and `head_limit`; paths are absolute and sorted by path, where the
+  native tool sorts by time.
+- **Glob** answers the managed files the pattern matches, `**` any number of folders; literal
+  folders at the pattern's start move its base, so `docs/**/*.md` from the root is answered.
+- **On any doubt it passes**, and the native tool reads the disk: the model is not watched (the
+  cookie was not heard), the path reaches past the managed folders (a Grep of the whole checkout),
+  an argument the model does not answer (context lines, `type`, `multiline`, `offset`, any other),
+  a pattern Go's `regexp` does not take or a glob with braces, a file the Grep would read that the
+  model holds by hash alone (larger than `content-limit`; a binary one is skipped, as ripgrep
+  does), or more than 1000 answers.
+- The model holds every managed file but `.git`, `node_modules` and its own, hidden ones
+  included, and reads no `.gitignore`: within a managed folder the answer may name a file
+  ripgrep would skip.
 
 ### How each host receives the deny
 
