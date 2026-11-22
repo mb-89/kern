@@ -12,7 +12,8 @@
     {"file": "[[expect]]\nname = \"n\"\nport = \"n\"\nvalue = 1\nexact = [\"title\"]\n", "refusal": "expect 1: exact path \"title\" starts at value, ask or answer"},
     {"file": "[[expect]]\nname = \"n\"\nport = \"n\"\nvalue = 1\n[[expect]]\nname = \"m\"\nport = \"n\"\nvalue = 2\n", "refusal": "expect 2: expect 1 already reads port n given \"\": one value per port and given"},
     {"file": "[[expect]]\nname = \"n\"\nport = \"n\"\nvalue = 1\nwriter = \"source\"\n", "refusal": "no key writer"},
-    {"file": "[[claim]]\nname = \"n\"\n", "refusal": "claim 1: a claim sets port, the output it writes the name on, or verb, the verb that answers the request, and not both"}
+    {"file": "[[claim]]\nname = \"n\"\n", "refusal": "claim 1: a claim sets port, the output it writes the name on, or verb, the verb that answers the request, and not both"},
+    {"file": "[[claim]]\nname = \"n\"\nport = \"a\"\n[[claim]]\nname = \"n\"\nport = \"b\"\n", "refusal": "claim 2: claim 1 already claims name \"n\""}
   ],
   "matches": [
     {"want": "value = {number = 1, labels = [\"work\"], pushed = 3.0}", "got": {"number": 8, "title": "more keys are fine", "labels": ["ready", "work"], "pushed": 4.5}, "exact": [], "refusal": ""},

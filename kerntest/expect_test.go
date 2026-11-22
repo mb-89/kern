@@ -179,7 +179,7 @@ verb = "append"
 
 // reader is the component the fake answers from its expectations: it sums
 // the numbers it reads, and posts each word, keeping the last answer.
-func reader() *index.Component {
+func readerComponent() *index.Component {
 	post := index.Request[string, int]("post", "Posts a line.")
 	return index.Declare("reader", "Sums numbers and posts lines.",
 		post, index.Output("filed", 0, "The last line's number."),
@@ -249,7 +249,7 @@ func writeFile(t *testing.T, name, text string) string {
 func TestAReadersTestIsAnsweredFromItsOwnExpectations(t *testing.T) {
 	t.Parallel()
 	path := writeFile(t, "reader.expect.toml", readerExpects)
-	f, err := kerntest.Expecting(reader(), path)
+	f, err := kerntest.Expecting(readerComponent(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,14 +307,14 @@ ask = "only this"
 exact = ["ask"]
 answer = 1
 `)
-	f, err := kerntest.Expecting(reader(), path)
+	f, err := kerntest.Expecting(readerComponent(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.Call("file", "that"); err == nil || !strings.Contains(err.Error(), path+`: no expectation answers the request "that" on port post: state it there`) {
 		t.Fatalf("an unexpected request was answered: %v", err)
 	}
-	if _, err := kerntest.Expecting(reader(), writeFile(t, "bad.expect.toml", "[[expect]]\nname = \"n\"\nport = \"nowhere\"\nvalue = 1\n")); err == nil || !strings.Contains(err.Error(), `reads no input "nowhere"`) {
+	if _, err := kerntest.Expecting(readerComponent(), writeFile(t, "bad.expect.toml", "[[expect]]\nname = \"n\"\nport = \"nowhere\"\nvalue = 1\n")); err == nil || !strings.Contains(err.Error(), `reads no input "nowhere"`) {
 		t.Fatalf("the fake took an expectation of a port the reader lacks: %v", err)
 	}
 }

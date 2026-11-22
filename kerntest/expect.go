@@ -232,6 +232,11 @@ func ParseExpectations(file string, data []byte) (Expectations, error) {
 		if (c.Port == "") == (c.Verb == "") {
 			fail("%s: a claim sets port, the output it writes the name on, or verb, the verb that answers the request, and not both", where)
 		}
+		for j, prev := range x.Claims {
+			if prev.Name == c.Name {
+				fail("%s: claim %d already claims name %q", where, j+1, c.Name)
+			}
+		}
 		x.Claims = append(x.Claims, c)
 	}
 	if len(errs) > 0 {

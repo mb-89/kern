@@ -191,6 +191,9 @@ def parse(file: str, data: bytes) -> Expectations:
         if bool(c.port) == bool(c.verb):
             errs.append(f"{where}: a claim sets port, the output it writes the name on, or verb, the verb that "
                         "answers the request, and not both")
+        for j, prev in enumerate(x.claims, 1):
+            if prev.name == c.name:
+                errs.append(f"{where}: claim {j} already claims name {json.dumps(c.name)}")
         x.claims.append(c)
     if errs:
         raise ExpectationError(f"{file}: " + "; ".join(errs))
