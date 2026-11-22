@@ -19,7 +19,7 @@ named in the design's plan.
 | `host/` | the core's process: the standing file, the detached start and its claim file, leases, placements, the idle end | v5 `src/index/detach*.go`, `start.go`, `door.go` |
 | `git/` | kern's git door: every git command kern and SE's Go components run, real git outside tests and the fake (`git/gitfake/`) in them, both held to one contract (`git/contract_test.go`); a test that chose no backend is refused real git, and `SE_GIT_DOOR` picks a process's backend, its `fake:<state file>` read from the state SE's Python fake writes (`git/gitfake/state.go`) | SE's `scripts/git_door.py` |
 | `cli/` | the core's command line, the same for the bare core and every application: `<name> start`, `status`, `stop`, `serve`, `hook`, `mcp` | |
-| `mcp/` | the MCP door, `<name> mcp`: the catalog's read-only commands as tools over stdio ([The MCP door](#the-mcp-door)) | |
+| `mcp/` | the MCP door, `<name> mcp`: the catalog's read-only and writing commands as tools over stdio ([The MCP door](#the-mcp-door)) | |
 | `cmd/kern/` | the bare binary: `kern start`, `kern status`, `kern stop`, `kern serve`, `kern hook`, carrying kern's shared components | |
 | `components/clock/` | the clock: time as names, `time` since its start 10 times a second, and `second`, `minute` and `hour` counting up, which a component reads instead of keeping a timer ([its README](components/clock/README.md)) | |
 | `components/github/` | the GitHub component: the token and relay backends and the snapshot names ([its README](components/github/README.md)) | the design's step 7 |
@@ -140,16 +140,38 @@ launcher, since its working directory need not be the checkout.
 | `status` | the core's state and health, as `kern status --json`, and `core`, how the door came to it: `attached`, `started` or `started again` |
 | `greeting` | the names and read-only commands the application names in `cli.Greeting`, read in order; a part the catalog lacks is left out, and with no part there is no greeting tool |
 | `<instance>` | one per switched-on instance with read-only commands, named in snake_case (`mcp.ToolName`: `retro-due` reads `retro_due`): `command`, one of them, `args` and `page`; its description lists each with its `mcp` line and usage |
+| `<instance>_write` | one per switched-on instance with writing commands, its arguments and description as `<instance>`'s: it runs one of them, which writes |
 
-- **Read-only, command by command.** A command's declaration says `read-only = true` where it
-  changes nothing (`index.CommandDecl.ReadOnly`), whatever its class: an interactive command may
-  still write, as one that syncs the checkout does. Only those are tools. Every tool carries
-  `readOnlyHint`, `destructiveHint: false` and `idempotentHint`; `openWorldHint` is set on those
-  that run a component's command, which may read an outside service. The hints neither grant nor
-  force a host's approval.
-- **The catalog check.** `mcp.Tools` refuses a read-only command without its `mcp` line, when an
-  agent uses it (`index.CommandDecl.MCP`; both declaration readers read both keys), an instance
-  whose tool name takes one of the door's own, and a greeting entry not declared read-only. The door then serves the
+- **Read-only or writing, command by command.** A command's declaration says `read-only = true`
+  where it changes nothing (`index.CommandDecl.ReadOnly`), whatever its class: an interactive
+  command may still write, as one that syncs the checkout does. It says `writes = true` where it
+  writes only through its requests (`index.CommandDecl.Writes`), never both. Only those two are
+  tools: a command declared neither is in none.
+  - A read-only tool carries `readOnlyHint`, `destructiveHint: false` and `idempotentHint`.
+  - A writing tool says it writes: `readOnlyHint: false`, `destructiveHint: true` (MCP's reading
+    of a writing tool that says no more, since the door cannot know a write only adds) and no
+    `idempotentHint`.
+  - `openWorldHint` is set on every tool that runs a component's command, which may reach an
+    outside service. The hints neither grant nor force a host's approval.
+- **A write goes through its I/O component.** A writing tool's call is the command's call,
+  `call.<command>`, as a read-only tool's is: the core runs the command, commits what it writes
+  and delivers each request it answers to the I/O verb the wiring binds its port to (`index`
+  `Call`), so a write through the door passes the wire's type check and the verb's own, and
+  leaves the record any call leaves. The door reaches no outside service itself.
+  - An I/O component's own writing command asks its own verb the same way: a request port that
+    names a verb of its component (`index.RequestPort.Self`) is bound to it where the wiring binds
+    the port to nothing.
+  - The [GitHub component](components/github/README.md) serves `github_write`: its commands
+    `github issue-create` and `github issue-comment`, through its verbs of those names. They take a
+    filled template, never free text, and check it against the template before anything reaches
+    GitHub ([its README](components/github/README.md#writes-filled-templates-only)).
+  - `components/github/door_test.go` files an issue through the door and the real core against
+    the component's fake REST server.
+- **The catalog check.** `mcp.Tools` refuses a read-only or writing command without its `mcp`
+  line, when an agent uses it (`index.CommandDecl.MCP`; both declaration readers read every key),
+  a writing command whose instance has no request port to write through, an instance whose tool
+  name takes one of the door's own or another tool's, and a greeting entry not declared read-only.
+  The door then serves the
   tools it made, and its status tool names the refusal; an application's test holds its own
   catalog to the check, as SE's `components/cmd/se/mcp_test.go` does.
 - **Tests.** `mcp/door_test.go` drives the door with a fake client, JSON-RPC lines over pipes,

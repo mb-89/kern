@@ -147,6 +147,7 @@ func ReadDeclaration(path string) (*Component, error) {
 //	[commands."tally note"]
 //	usage = "..."; summary = "..."; group = "..."; help = "..."; class = "batch"; session = true
 //	read-only = true; mcp = "..."   # it changes nothing, and when to use it: the MCP door offers it (mcp.Tools)
+//	writes = true                   # or: it writes only through its requests: the door offers it as a writing tool
 //	[requests.post]
 //	type = "string"; answer = "int"; help = "..."
 //	[verbs.append]                         # an I/O component's
@@ -233,12 +234,12 @@ func ParseDeclaration(data []byte) (*Component, error) {
 	commands := d.table(doc, "commands")
 	for _, n := range sortedKeys(commands) {
 		where := fmt.Sprintf("commands.%q", n)
-		t := d.sub(commands, n, where, "usage", "summary", "group", "help", "class", "session", "read-only", "mcp")
+		t := d.sub(commands, n, where, "usage", "summary", "group", "help", "class", "session", "read-only", "writes", "mcp")
 		k := &command{decl: CommandDecl{
 			Name: n, Usage: d.str(t, "usage", false), Summary: d.str(t, "summary", false),
 			Group: d.str(t, "group", false), Help: d.str(t, "help", false),
 			Class: Class(d.str(t, "class", false)), Session: d.flag(t, where, "session"),
-			ReadOnly: d.flag(t, where, "read-only"), MCP: d.str(t, "mcp", false),
+			ReadOnly: d.flag(t, where, "read-only"), Writes: d.flag(t, where, "writes"), MCP: d.str(t, "mcp", false),
 		}, in: in}
 		c.addCommand(k)
 	}
