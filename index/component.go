@@ -173,6 +173,8 @@ type Component struct {
 	hears func(instance, event string, payload []byte) error
 	// tells is an I/O component's word to the agent on the host's events.
 	tells func(instance, event string, payload []byte) string
+	// guards is an I/O component's refusal of a host's event, such as a tool call.
+	guards func(instance, event string, payload []byte) string
 	// react is an I/O component's run on a change of a name it reads, such as the clock's second.
 	react *reaction
 	// forbids is an I/O component's forbid list (Forbids), and pkg the Go
@@ -258,8 +260,8 @@ func Declare(name, help string, parts ...Part) *Component {
 	if len(c.verbs) > 0 && !c.io {
 		c.fail("component %s accepts verbs but carries no I/O flag: only an I/O component reaches the outside", name)
 	}
-	if (c.inlet != nil || c.hears != nil || c.tells != nil || c.react != nil) && !c.io {
-		c.fail("component %s commits on its own, hears the host's events or reacts to a change but carries no I/O flag", name)
+	if (c.inlet != nil || c.hears != nil || c.tells != nil || c.guards != nil || c.react != nil) && !c.io {
+		c.fail("component %s commits on its own, hears or guards the host's events, or reacts to a change but carries no I/O flag", name)
 	}
 	c.checkForbids()
 	return c

@@ -475,6 +475,10 @@ const (
 	Pass = "pass"
 	// Output is the effect of an event a command answered: its text is the host's hook output.
 	Output = "output"
+	// Deny is the effect of an event a component's guard refused
+	// (index.Guards): the host does not run the tool call, and the agent
+	// reads the reason, which names what to do instead.
+	Deny = "deny"
 )
 
 // HookArg is the one argument the command bound to an event is run with:
@@ -490,12 +494,15 @@ type HookAnswer struct {
 	// Context is what the components that tell the agent say on the event,
 	// which the hook hands the agent; empty for none.
 	Context string `json:"context,omitempty"`
+	// Reason is why a guard denies the event, for the agent, where Effect is Deny.
+	Reason string `json:"reason,omitempty"`
 }
 
 // hook takes a host's hook event: each renews the session's lease, and
 // SessionEnd returns it. Every instance that hears the host's events is
 // handed it first; what one refuses goes to the log, and the hook passes.
-// Where the wiring binds the event to a command, the command answers it, run
+// Then the instances that guard them are asked: the first that refuses the
+// event denies it with its reason, and no command runs. Where the wiring binds the event to a command, the command answers it, run
 // with HookArg and the event's JSON; where its instance's process has not
 // attached yet, or the command fails, the event passes with the reason, at
 // once rather than waiting for the attach.
@@ -513,6 +520,10 @@ func (c *Core) hook(m *nats.Msg) {
 	}
 	if err := c.ix.Hear(event, m.Data); err != nil {
 		fmt.Fprintln(c.o.Log, err)
+	}
+	if reason := c.ix.Guard(event, m.Data); reason != "" {
+		c.reply(m, HookAnswer{Effect: Deny, Reason: reason})
+		return
 	}
 	told := strings.Join(c.ix.Tell(event, m.Data), "\n\n")
 	h, bound := c.hooks[event]

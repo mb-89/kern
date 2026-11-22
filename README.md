@@ -54,7 +54,7 @@ bare run with `cli.Bare`, and the help renders them all.
 | `kern serve [--grace D] [--idle D]` | the core in the foreground: reads `wiring.toml` where the checkout has one |
 | `kern mcp [--grace D] [--idle D]` | the MCP door over stdio ([The MCP door](#the-mcp-door)): starts the core with the grace and idle given, or attaches to it, and holds a session lease while the client is connected |
 | `kern mcp --tools` | prints the tools the door would serve for the checkout, as `tools/list` answers them, indented JSON in served order, and exits 0: starts no core, takes no lease, reads no input ([The tool list's size](#the-tool-lists-size)) |
-| `kern hook <event> [--wait D] [--unanswered N]` | posts the host's hook JSON from stdin on `hook.<event>`, waiting up to 500 ms for a core whose start's claim stands; prints the answer as the host's hook JSON: the bound command's output, else the context the components told on `PostToolUse`, `UserPromptSubmit` and `SessionStart` (the [GitHub component](components/github/README.md)'s waiting tool calls) as `additionalContext`, nothing for a `pass` with nothing told; where no core answers, prints nothing; exits 0, or N where no command answered the event and nothing was told |
+| `kern hook <event> [--wait D] [--unanswered N]` | posts the host's hook JSON from stdin on `hook.<event>`, waiting up to 500 ms for a core whose start's claim stands; prints the answer as the host's hook JSON: a component's deny of the tool call with its reason, in the host's format, exit code 2 and the reason on stderr ([Agent tools](#agent-tools)); else the bound command's output, else the context the components told on `PostToolUse`, `UserPromptSubmit` and `SessionStart` (the [GitHub component](components/github/README.md)'s waiting tool calls) as `additionalContext`, nothing for a `pass` with nothing told; where no core answers, prints nothing; exits 0, or N where no command answered the event and nothing was told |
 | `kern forbids [--root DIR]` | scans the checkout's components (`components/`) against the forbid lists of the I/O components the binary carries and those declared there ([Forbid lists](#forbid-lists)): each use of another I/O module's entry is a line on stderr, naming the file, the line, the component's folder and the module that owns it, and the exit is 1; else one line on stdout and 0. It starts no core |
 
 - **The standing file**, `.se/.runtime/standing.json`, readable by its owner alone: the bus's
@@ -94,6 +94,10 @@ bare run with `cli.Bare`, and the help renders them all.
   a timer of its own, and the clock's forbid list refuses a component that reads the system time
   itself ([Forbid lists](#forbid-lists)). Every wait for an answer measures its limit
   against the host's clock (`host.Clock`), which a test replaces with a clock it moves itself.
+- **Guards.** An I/O component that declares `index.Guards` is asked after the event is heard:
+  the first instance that refuses it answers the effect `deny` with its reason, and no bound
+  command runs. The [files component](components/files/README.md) is kern's one guard
+  ([Agent tools](#agent-tools)).
 - **Hooks a command answers.** The wiring's `[hooks]` binds a host's event to a command, such as
   `Stop = "work_tickets.py stop-check"`; the core refuses to start where no instance declares it.
   The core runs it with one argument, `--hook=` and the event's JSON, and answers the effect
@@ -250,6 +254,101 @@ option B).
 - **Outside managed folders** nothing changes.
 
 The component's [README](components/files/README.md) is its contract.
+
+## Agent tools
+
+The person's decision of 22 Nov (deck "Files, templates and agent tools", lean routing): kern
+refuses only a write to a managed file, naming the way to do it, and answers a search over a
+managed folder from the warm model; every other tool call passes, and with kern down every one
+does. It does so through the hook every
+host the person uses runs before a tool, never a path only one host has.
+
+> Just understand that we're not only using Claude Code. We're also using Copilot, and the hooks
+> need to. We can't use hooks of which we know that they only work in Claude Code in general.
+
+### What is refused
+
+Only a write to a managed file ([Files](#files)): the files component guards `PreToolUse`
+(`index.Guards`, [its README](components/files/README.md#the-guard)) and denies a call that writes
+one, naming the files and its tools `files` and `files_write` (`files read`, then `files edit`,
+`files write` or `files remove`, each naming the version read). What a call writes is
+`host.ToolCall.Writes`:
+
+- **File tools:** Claude Code's Write, Edit, MultiEdit and NotebookEdit; the Copilot CLI's
+  `create`, `edit`, `str_replace_editor` (but its `view`) and `apply_patch`, each mapped onto its
+  Claude name (`host.CopilotTools`).
+- **Shell commands** (Bash; the Copilot CLI's `bash` and `powershell`), parsed, never run or
+  blocked whole (`host.ShellWrites`): output redirections, `tee`, `cp`, `mv`, `install`, `ln`,
+  `rm`, `unlink`, `touch`, `truncate`, `shred`, `dd of=`, `sed -i`, `perl -i` and PowerShell's
+  content and item cmdlets, each target resolved against the call's working directory and any `cd`
+  before it. A target the parser cannot be sure of, a variable, a glob or a command substitution,
+  is no write, and a script that writes from inside (`python -c`) is not seen: the lean routing
+  refuses only what it knows, and the watcher and compare-and-swap keep the model right past it.
+- **Everything else passes:** reads, files outside the managed folders, kern's own folder `.se/`,
+  every event but `PreToolUse`, and every call while no files instance runs.
+
+### Searches answered from the model
+
+A Grep or a Glob over a managed folder (Claude Code's, the Copilot CLI's `grep`, `rg` and `glob`)
+is answered from the warm model as the deny's reason, which says it is the search's result and not
+an error, so the native tool does not run (`files` `answerSearch`, [its
+README](components/files/README.md#the-guard)):
+
+- **Grep** answers, as the native tool does, the files that match (`Found N files` and their
+  paths, its default), their lines (`output_mode` `content`, `path:line:text`) or their counts
+  (`count`), with `-i`, `glob` and `head_limit`; paths are absolute and sorted by path, where the
+  native tool sorts by time.
+- **Glob** answers the managed files the pattern matches, `**` any number of folders; literal
+  folders at the pattern's start move its base, so `docs/**/*.md` from the root is answered.
+- **On any doubt it passes**, and the native tool reads the disk: the model is not watched (the
+  cookie was not heard), the path reaches past the managed folders (a Grep of the whole checkout),
+  an argument the model does not answer (context lines, `type`, `multiline`, `offset`, any other),
+  a pattern Go's `regexp` does not take or a glob with braces, a file the Grep would read that the
+  model holds by hash alone (larger than `content-limit`; a binary one is skipped, as ripgrep
+  does), or more than 1000 answers.
+- The model holds every managed file but `.git`, `node_modules` and its own, hidden ones
+  included, and reads no `.gitignore`: within a managed folder the answer may name a file
+  ripgrep would skip.
+
+### How each host receives the deny
+
+`kern hook PreToolUse` (or `preToolUse`) reads the host's payload through `host.ParseToolCall`,
+either field style, and prints a deny in the shape that payload's host reads
+(`cli.DenyOutput`), with exit code 2 and the reason on stderr (`cli.DenyExit`):
+
+| host | registers | payload | the deny it reads |
+|---|---|---|---|
+| Claude Code | `PreToolUse` | `tool_name`, `tool_input` | `hookSpecificOutput.permissionDecision` `deny` and `permissionDecisionReason`, which the agent reads; exit code 2 blocks and takes that reason |
+| Copilot CLI, VS Code compatible format | `PreToolUse` (PascalCase), as SE's `.github/hooks/se.json` does | `tool_name` as the Claude name (`bash` reads `Bash`), `tool_input` | `hookSpecificOutput`, as VS Code's; exit code 2 denies the call in the CLI whatever JSON it reads |
+| Copilot CLI, camelCase format | `preToolUse` | `toolName` as the runtime name (`create`, `edit`, `bash`, `grep`, `glob`), `toolArgs`, an object or a JSON string | `permissionDecision` `deny` and `permissionDecisionReason` at the top level; exit code 2 denies |
+| VS Code (Copilot harness) | `PreToolUse` | `tool_name`, `tool_input` | `hookSpecificOutput`; exit code 2 hands the model the standard error, the reason |
+
+### Which hosts have such a hook
+
+The comment of 22 Nov on kern#21 asks which hosts have a hook that can refuse a tool call; where
+one has none, its writes go past the warm model, which the person accepted: the watcher and
+compare-and-swap keep the model right.
+
+> So a host without hooks or any other tool still writes past it. Yeah, that's acceptable.
+
+| host | its hook | the gap |
+|---|---|---|
+| Claude Code (terminal, IDE, cloud) | `PreToolUse` | none known |
+| Copilot CLI | `preToolUse` / `PreToolUse`, from user, project and plugin hook files | a command hook that crashes fails closed (`kern hook` exits 0 on every error, 2 only on a deny); which reason the CLI shows for exit code 2 with JSON on stdout its reference does not say, so the reason is on both |
+| Copilot cloud agent (github.com) | the repository's hook files, `bash` entries alone; `preToolUse` fires | the runner has no kern binary unless the repository's setup steps place one; without it the hook prints nothing and every call passes |
+| VS Code, Copilot harness | `PreToolUse`, the CLI's runtime and Claude names | none known |
+| VS Code, Local harness (deprecated, removed February 2027) | `PreToolUse` | its tool names differ and are not mapped (`host.CopilotTools` holds the CLI's), so its writes and searches pass |
+| any MCP host without a hook that refuses a call | none | its native writes pass; the MCP door's `files` and `files_write` are the same way in, served to every host that runs the door |
+
+Registering the hook is the application's: SE's Claude Code plugin runs `kern hook` on
+`PreToolUse` through its `se_hook.sh`; its Copilot hook files register `SessionStart` and `Stop`
+alone, so a Copilot session under SE sees no deny until they register `PreToolUse` too.
+
+Every host fails open on a hook's time-out, and `kern hook` prints nothing and exits 0 where no
+core answers: with kern down every tool call passes, reads and searches included. Sources: the
+Copilot CLI's hooks reference (docs.github.com, copilot/reference/hooks-reference), VS Code's
+(code.visualstudio.com, docs/agents/reference/hooks-reference) and Claude Code's
+(code.claude.com, docs/en/hooks), each read 2026-11-22.
 
 ## Tests
 

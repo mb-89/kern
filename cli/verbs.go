@@ -95,7 +95,7 @@ func init() {
 			Flags: mcpFlags, Run: runMCP},
 		{Name: "hook", Args: "<event> [--root DIR] [--wait D] [--unanswered N]", Hosts: true, Lead: true, FailOpen: true,
 			Doc:   "post the host's hook JSON on stdin to the core and print its answer",
-			Exit:  "0 and nothing printed where no core answers (a hook fails open), or N with --unanswered N where no command answered",
+			Exit:  "0 and nothing printed where no core answers (a hook fails open), N with --unanswered N where no command answered, or 2 where a component denies the tool call, its reason on stderr",
 			Flags: hookFlags, Run: runHook},
 		{Name: "forbids", Args: "[--root DIR]", Hosts: true,
 			Doc:   "refuse a component's code that uses what another I/O module forbids, before it is committed",
