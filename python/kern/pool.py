@@ -103,3 +103,39 @@ def _written(f: Fake, port: str) -> Any:
     if not o.family:
         return f.out(port).value
     return {at.split("/", 1)[1]: v for at, v in f._out.items() if at.startswith(port + "/")}
+
+
+def check(wiring: dict, *mods: Module) -> None:
+    """The completeness check over a wiring, as ``kerntest.Check``: among the components its switched-on
+    instances load, every expectation of a loaded component is claimed by exactly one loaded component and met
+    by it. Raise naming each that is unclaimed, claimed twice or unmet, each in its own words."""
+    loaded = {t["component"] for t in wiring.get("instances", {}).values() if t.get("enabled", True)}
+    by_name: dict[str, Module] = {}
+    for m in mods:
+        if m.name in by_name:
+            raise expect.ExpectationError(f"the check takes component {m.name} twice")
+        if m.name in loaded:
+            by_name[m.name] = m
+    pool: Pool = {}
+    claims: dict[str, list[tuple[Module, expect.Claim]]] = {}
+    for n in sorted(by_name):
+        x = by_name[n].read()
+        _add(pool, x)
+        for c in x.claims:
+            claims.setdefault(c.name, []).append((by_name[n], c))
+    errs = []
+    for e in sorted((e for es in pool.values() for e in es), key=lambda e: (e.file, e.n)):
+        cs = claims.get(e.name, [])
+        if not cs:
+            errs.append(f'unclaimed: name "{e.name}": no loaded component claims {e} of {e.file}')
+        elif len(cs) > 1:
+            names = " and ".join(m.name for m, _ in cs)
+            errs.append(f'claimed twice: name "{e.name}": {names}, all loaded, claim {e} of {e.file}: exactly one may')
+        else:
+            m, c = cs[0]
+            try:
+                m._meet(c, e)
+            except Exception as err:  # noqa: BLE001 - every failure is the claimer's to answer
+                errs.append(m._unmet(e, err))
+    if errs:
+        raise expect.ExpectationError("\n".join(errs))

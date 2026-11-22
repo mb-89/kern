@@ -15,7 +15,7 @@ sys.path.insert(0, str(KERN / "python"))
 from kern import expect  # noqa: E402
 from kern.component import Component  # noqa: E402
 from kern.declaration import parse as parse_declaration  # noqa: E402
-from kern.pool import Module, read_pool  # noqa: E402
+from kern.pool import Module, check, read_pool  # noqa: E402
 
 from test_kern_expect import READER_EXPECTS, reader  # noqa: E402
 
@@ -101,3 +101,45 @@ def test_a_writer_that_does_not_meet_an_expectation_fails_its_own_test(tmp_path:
     count.given = {"numbers stand": lambda f: None}
     with pytest.raises(expect.ExpectationError, match="value is an empty list, want at least one item"):
         count.meet(pool)
+
+
+def wiring(*components: str) -> dict:
+    instances = {}
+    for c in components:
+        name, off = c.removesuffix(" off"), c.endswith(" off")
+        instances[name] = {"component": name, **({"enabled": False} if off else {})}
+    return {"instances": instances}
+
+
+def test_the_completeness_check_passes_where_each_expectation_is_claimed_and_met_once(tmp_path: Path) -> None:
+    rd, count, ledger = modules(tmp_path)
+    check(wiring("reader", "counter", "lines"), rd, count, ledger)
+    other = Module(counter("other-counter"), count.file, count.given)
+    check(wiring("reader", "other-counter", "lines"), rd, count, other, ledger)
+    check(wiring("reader", "counter", "other-counter off", "lines"), rd, count, other, ledger)
+
+
+def test_the_completeness_check_refuses_an_unclaimed_expectation(tmp_path: Path) -> None:
+    rd, count, ledger = modules(tmp_path)
+    with pytest.raises(expect.ExpectationError) as e:
+        check(wiring("reader", "counter", "lines off"), rd, count, ledger)
+    assert f'unclaimed: name "lines.append": no loaded component claims expect 3 (request post, ask "") of {rd.file}' in str(e.value)
+    assert 'name "numbers"' not in str(e.value)
+
+
+def test_the_completeness_check_refuses_an_expectation_claimed_twice(tmp_path: Path) -> None:
+    rd, count, ledger = modules(tmp_path)
+    other = Module(counter("other-counter"), count.file, count.given)
+    with pytest.raises(expect.ExpectationError) as e:
+        check(wiring("reader", "counter", "other-counter", "lines"), rd, count, other, ledger)
+    assert (f'claimed twice: name "numbers": counter and other-counter, all loaded, claim expect 1 (port numbers) '
+            f'of {rd.file}: exactly one may') in str(e.value)
+
+
+def test_the_completeness_check_refuses_an_unmet_expectation(tmp_path: Path) -> None:
+    rd, count, ledger = modules(tmp_path)
+    ledger.component = lines([], refuse_empty=False)
+    with pytest.raises(expect.ExpectationError) as e:
+        check(wiring("reader", "counter", "lines"), rd, count, ledger)
+    assert (f'unmet: name "lines.append": lines does not meet expect 3 (request post, ask "") of {rd.file}: its verb '
+            "append answers 1, and the expectation is a refusal") in str(e.value)
