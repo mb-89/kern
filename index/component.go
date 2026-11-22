@@ -133,6 +133,10 @@ type RequestDecl struct {
 	Help     string
 	// ReqShape and AnsShape are the named JSON shapes of a declared port's request and answer.
 	ReqShape, AnsShape string
+	// Self is a verb of the port's own I/O component, which the port is bound
+	// to where the wiring binds it to nothing: an I/O component's command
+	// asks its own verb through the core, as any command asks one.
+	Self string
 }
 
 // VerbDecl is a verb an I/O component accepts: the request it takes and the answer it gives.
@@ -577,6 +581,13 @@ type RequestPort[Req, Ans any] struct{ decl RequestDecl }
 // it to an I/O component's verb that takes Req and answers Ans.
 func Request[Req, Ans any](port, help string) *RequestPort[Req, Ans] {
 	return &RequestPort[Req, Ans]{RequestDecl{Port: port, Req: reflect.TypeFor[Req](), Ans: reflect.TypeFor[Ans](), Help: help}}
+}
+
+// Self binds the port to verb, a verb of its own I/O component, where the
+// wiring binds it to nothing (RequestDecl.Self); a wire binds it elsewhere.
+func (r *RequestPort[Req, Ans]) Self(verb string) *RequestPort[Req, Ans] {
+	r.decl.Self = verb
+	return r
 }
 
 // Ask is a request of v on the port.
