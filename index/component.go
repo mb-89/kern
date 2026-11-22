@@ -177,6 +177,12 @@ type Component struct {
 	guards func(instance, event string, payload []byte) string
 	// react is an I/O component's run on a change of a name it reads, such as the clock's second.
 	react *reaction
+	// forbids is an I/O component's forbid list (Forbids), and pkg the Go
+	// package that declared the component (Package).
+	forbids *Forbidden
+	pkg     string
+	// writes are the folders it declares it writes with direct file calls (Writes).
+	writes []string
 }
 
 type reaction struct {
@@ -218,6 +224,7 @@ func Declare(name, help string, parts ...Part) *Component {
 		commands: map[string]*command{},
 		requests: map[string]*RequestDecl{},
 		verbs:    map[string]*verb{},
+		pkg:      callerPackage(1),
 	}
 	if !pathName(name) {
 		c.fail("a component needs a name of letters, digits and dashes, or <group>/<component>, not %q", name)
@@ -256,6 +263,7 @@ func Declare(name, help string, parts ...Part) *Component {
 	if (c.inlet != nil || c.hears != nil || c.tells != nil || c.guards != nil || c.react != nil) && !c.io {
 		c.fail("component %s commits on its own, hears or guards the host's events, or reacts to a change but carries no I/O flag", name)
 	}
+	c.checkForbids()
 	return c
 }
 

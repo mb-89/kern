@@ -1,0 +1,7 @@
+name = "pyclock"
+contract = 1
+io = true
+help = "A declared I/O module whose forbid list the scan reads from its component.toml."
+
+[forbids]
+calls = ["time.monotonic"]

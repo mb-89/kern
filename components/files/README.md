@@ -117,12 +117,14 @@ Reused from quackitect v4 (`src/engine/indexwatch.go`) and v5 (`src/modules/file
 
 ## The forbid list
 
-Every I/O module declares what only it may use (kern#18). The files module's list is
-`files.Forbids`: the direct file writes of Go's package `os` and their Python counterparts. They
-are forbidden to every other component on the managed folders. Since the folders are a setting, a
-check of a call names the call and the managed folders it may reach. kern#18's check reads the
-list once it lands; `TestTheForbidListNamesTheModulesOwnWrites` holds it to every write of package
-`os` the module makes itself.
+Every I/O module declares what only it may use (kern's README "Forbid lists"). The files module's
+list is `files.Forbids`: the direct file writes of Go's package `os` and their Python
+counterparts, declared with `index.Forbids` on its config `folders` (`on = "folders"`). They are
+forbidden to every other component on the managed folders: `kern forbids` refuses a component's
+use of one unless it declares the folders it writes (`index.Writes`) and none of them is a folder
+the checkout's wiring manages, naming the call and the managed folders.
+`TestTheForbidListNamesTheModulesOwnWrites` holds the list to every write of package `os` the
+module makes itself.
 
 ## Tests
 
