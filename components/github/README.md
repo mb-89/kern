@@ -27,7 +27,8 @@ found, else the relay. `token` without one refuses the start.
   The refresh then runs on its own, so a slow GitHub never holds the clock, and a second that
   comes while one still runs starts none. A wiring that leaves `second` built-in refreshes
   nothing.
-- **Its waits.** Every wait, `relay-wait`, `step-wait`, `tell-wait` and the pacing below, measures
+- **Its waits.** Every wait, `relay-wait`, `step-wait`, `tell-wait`, the pacing below and each REST
+  request's limit (`RequestWait`, 30 s, its body read included), measures
   against the host's clock (`host.Clock`), `Options.Clock`, so a test drives each with a clock it
   moves and never waits.
 - **Its pacing.** A `429`, or a `403` with `Retry-After` or `X-RateLimit-Remaining: 0`, is a rate
