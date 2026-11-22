@@ -110,6 +110,8 @@ se-file	cli/cli.go	.se/wiring
 se-file	components/github/README.md	.se/templates
 se-file	components/github/github.go	.se/templates
 se-file	components/session/README.md	.se/wiring
+se-file	contract/declarations.json	.se/x
+se-file	forbid/forbid_test.go	.se/record
 se-file	git/contract_test.go	scripts/adhoc.py
 se-file	git/contract_test.go	scripts/tracked.py
 se-file	home/home.go	scripts/se_home.py
@@ -122,6 +124,9 @@ se-file	host/scripts_test.go	scripts/work_tickets.py
 se-file	host/scripts_test.go	scripts/x.py
 se-file	host/usage.go	.se/components
 se-file	host/usage.go	scripts/se_usage.py
+se-file	index/declaration.go	.se/x
+se-file	index/forbids_test.go	.se/disk
+se-file	index/forbids_test.go	.se/x
 se-file	index/wiring.go	.se/wiring
 se-file	index/wiring_test.go	.se/components
 se-file	index/wiring_test.go	.se/wiring

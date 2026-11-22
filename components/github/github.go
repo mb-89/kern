@@ -224,7 +224,7 @@ func New(o Options) *GitHub {
 	g := &GitHub{o: o, held: map[string]func(){}, waiting: map[string][]chan any{}, outbox: map[string]Step{}, pages: map[string]*pages{}, last: map[string]any{},
 		answered: map[string]bool{}, stale: map[string]string{}, steps: map[string]*waitingStep{}, asked: make(chan struct{}, 1)}
 	parts := []index.Part{
-		index.IO(),
+		index.IO(), index.Forbids(Forbidden),
 		index.Config("backend", Auto, "auto, token or relay: auto takes the relay in a cloud session, else the token where one is found, else the relay."),
 		index.Config("api", "https://api.github.com", "The REST API the token backend reads."),
 		index.Config("refresh", "2m", "How often the token backend reads each snapshot it holds again, with its ETag, counted on the clock's second it reads; 0s reads none again. The relay answers a snapshot younger than it without asking."),
@@ -257,6 +257,16 @@ func New(o Options) *GitHub {
 	}
 	g.Component = index.Declare(Name, "Reaches GitHub, with a token or through the session's GitHub tools, and keeps what it reads as snapshots.", parts...)
 	return g
+}
+
+// Forbidden is the GitHub component's forbid list (index.Forbids): the gh
+// command, the REST API's host and the Go clients of GitHub, which only its
+// own code may use. Any other component reads GitHub through its names and
+// verbs (README.md "Forbid lists").
+var Forbidden = index.Forbidden{
+	Commands: []string{"gh"},
+	Hosts:    []string{"api.github.com"},
+	Imports:  []string{"github.com/google/go-github", "github.com/cli/go-gh"},
 }
 
 // Component is the component a binary carries; importing this package registers it.

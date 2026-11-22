@@ -194,6 +194,12 @@ An outbox entry stands at `<verb>.<key>`, a step's at `step.<tool>.<hash of its 
 off with `enabled = false`: it then looks for no token and hears nothing, and its names read their
 built-in values.
 
+## Its forbid list
+
+The component forbids every other component reaching GitHub past it (`github.Forbidden`, kern's
+README "Forbid lists"): the command `gh`, the host `api.github.com`, and the imports
+`github.com/google/go-github` and `github.com/cli/go-gh`. Only its own folder may use them.
+
 ## Claims and its hot test
 
 `expect.toml` claims `github.issues` and the read verbs' requests, `github.issue`, `github.pull`,
