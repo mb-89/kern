@@ -1,0 +1,98 @@
+# lsp
+
+kern's `lsp` component runs the checker (package `lint`) over the warm model of the managed
+folders ([files](../files/README.md)). It is what the language server, `<name> lsp`, shows in the
+editor, what `<name> lint` prints and what the tests find (`lsptest`), so they find the same: a
+rule is written once and reaches all three. This is the person's decision of 22 Nov: checks on
+managed files are served through the Language Server Protocol, and the language server uses the
+same checker as the tests.
+
+> So if I open our files in VS Code, the LSP will show me everything that's wrong. But the LSP has
+> the same logic as our internal tests. Maybe we can even use the LSP as the mechanism that checks
+> stuff, right?
+
+The component reaches nothing outside the index: it reads the model. Its outside thing, the
+editor, is reached by the language server's process, `<name> lsp` (package `kern/lsp`), which
+asks it through the core, as the MCP door asks a command.
+
+## Inputs, outputs and config
+
+| port | what |
+|---|---|
+| input `model` | the files module's model, wired to its family (`files/model/<key>`) |
+| input `folders` | the managed folders (`files/folders`): a link is judged where its target lies under one |
+| output `findings` | every finding over the model, sorted by path, line and column: derived, so it changes with every file the model hears change, and the language server redraws on its change |
+
+| config | built-in | what |
+|---|---|---|
+| `templates` | `.se/templates` | the folder of the templates, `<name>.json`, as the GitHub component reads them; only the templates the model holds are read |
+| `name-length` | `64` | the most characters a managed file's name holds; `0` sets no cap |
+| `name-words` | `5` | the most words a managed file's name holds before its first dot, split at dashes, underscores and spaces, the work model's name rule; `0` sets no cap |
+
+```toml
+[instances.files]
+component = "files"
+config = { folders = ["docs"] }
+
+[instances.lsp]
+component = "lsp"
+# config = { templates = ".se/templates", name-length = 64, name-words = 5 }
+
+[wires]
+"files.model" = "files/model/<key>"
+"files.folders" = "files/folders"
+"lsp.model" = "files/model/<key>"
+"lsp.folders" = "files/folders"
+"lsp.findings" = "lsp/findings"
+```
+
+## The command
+
+`lsp lint [OPEN]` is read-only, so the MCP door offers it as a tool too. It answers JSON:
+
+```json
+{"findings": [{"path": "docs/a.md", "line": 3, "col": 1, "rule": "template", "message": "template note: field kind is \"maybe\", none of idea, fact"}], "checked": 3}
+```
+
+- **A finding** names its file by its path from the root, its line from 1, its column from 1 in
+  UTF-16 code units as the Language Server Protocol counts them, `end_col` where it ends on the
+  line (none: the line's end), its rule and a message that names the remedy where it can.
+- **OPEN**, where given, is a JSON object of path to text, the editor's open buffers: each stands
+  in place of the file at its path, and one the model lacks is checked where it lies in a managed
+  folder (a new file not saved yet). One outside every managed folder is not checked.
+
+## The rules
+
+Package `lint` holds them, each named in its findings:
+
+- **`template`**: a Markdown file all of whose template's markers stand in it as lines of their
+  own was rendered from that template (the one with the most markers where several match). It is
+  held to it as the template's `Render` writes one: each heading of the template's level is a
+  field's, once and in the template's order; a heading the template does not know is refused
+  where its schema sets `additionalProperties` false; each field read back from its lines meets
+  its shape (required, `None` only where it may be, a choice among its choices, at most
+  `max_words`), as `form.Template.FieldFindings` holds a fill, and its schema (`form.Validate`);
+  a required label line stands. A template the model holds that cannot be read is found on its
+  own file. The templates are package `form`'s, the ones the GitHub component fills.
+- **`schema`**: a JSON file is JSON, and where its `"$schema"` names a path (relative to the file,
+  or from the root where it starts with `/`), the schema stands among the managed files and the
+  file meets it (`form.Validate`'s keywords: type, properties, required, additionalProperties,
+  items, enum). A `"$schema"` that names a URL is the editor's own JSON server's to judge.
+- **`link`**: a Markdown link or image, or a reference definition, whose target lies in a managed
+  folder reaches a file or a folder that stands, and a fragment into a Markdown file the model
+  holds reaches one of its headings (GitHub's slugs) or an HTML `name` or `id`. A target outside
+  every managed folder, or a URL, is judged not: the checker knows only the managed files. Code
+  blocks and code spans hold no link.
+- **`name`**: a managed file's name is within `name-length` and `name-words`.
+
+Beside the checker, standard servers stay for what they do well, prose (`vale-ls`) and code
+formatting (Biome); the editor runs them next to `<name> lsp`.
+
+## Tests
+
+`lint/lint_test.go` holds each rule to its findings over files in memory. `lsp_test.go` proves the
+three roads find the same: over one checkout, `lsptest.Findings` (the tests' road), `kern lint`
+against a core that runs its wiring (the command line's) and the language server against the same
+core (the editor's) return one set of findings, a file that breaks its template among them. The
+same case types, changes the disk, and closes the buffer, and each redraws. The component's own
+test is answered from its expectations (`expect.toml`), which the files component meets.

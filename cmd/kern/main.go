@@ -12,6 +12,7 @@ import (
 	_ "kern/components/clock"
 	_ "kern/components/files"
 	_ "kern/components/github"
+	_ "kern/components/lsp"
 	_ "kern/components/session"
 )
 

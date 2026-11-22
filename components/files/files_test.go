@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -149,8 +150,11 @@ func TestTheModelHoldsTheManagedFolders(t *testing.T) {
 	s0.put("docs/big.txt", strings.Repeat("x", 40))
 	s0.put("docs/bin.dat", "a\x00b")
 	s0.put("other/c.md", "three\n")
-	s := started(t, root, map[string]any{"folders": []string{"docs"}, "content-limit": 32})
+	s := started(t, root, map[string]any{"folders": []string{"./docs/"}, "content-limit": 32})
 
+	if v, _ := s.fake.Out("folders"); !reflect.DeepEqual(v.V, []string{"docs"}) {
+		t.Fatalf("the managed folders, as the start read them: %v", v.V)
+	}
 	a, ok := s.model("docs/a.md")
 	if !ok || a.Path != "docs/a.md" || a.Content != "one\n" || !a.Held || a.Size != 4 || len(a.Hash) != 64 {
 		t.Fatalf("docs/a.md in the model: %+v (stands: %v)", a, ok)
@@ -503,11 +507,25 @@ func TestTheModuleMeetsThePooledExpectations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var root string // each fresh instance's folder
 	m := kerntest.Module{
 		Component: files.Component.Component,
 		File:      "expect.toml",
 		Fresh: func() *index.Component {
-			return files.New(files.Options{Root: t.TempDir(), Watch: func() (files.Watcher, error) { return newFed(), nil }}).Component
+			root = t.TempDir()
+			return files.New(files.Options{Root: root, Watch: func() (files.Watcher, error) { return newFed(), nil }}).Component
+		},
+		Given: map[string]kerntest.Setup{
+			// The checker's (components/lsp/expect.toml): a managed file and its template.
+			"a file breaks its template": func(f *kerntest.Fake) error {
+				s := &setup{t: t, root: root}
+				s.put("docs/a.md", "<!-- se:form note -->\n\n## Kind\n\nmaybe\n")
+				s.put("docs/templates/note.json", `{"form": "note"}`)
+				if err := f.Config("folders", []string{"docs"}); err != nil {
+					return err
+				}
+				return f.Start("files")
+			},
 		},
 	}
 	if err := m.Meet(p); err != nil {

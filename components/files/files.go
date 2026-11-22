@@ -178,6 +178,7 @@ type Files struct {
 var (
 	modelOut    = index.Family("model", File{}, "Each managed file at its path's key (files.Key): its path, its content hash and, below content-limit, its content.")
 	watchingOut = index.Output("watching", false, "Whether the watcher reported the start's cookie in every managed folder: while false, reads, lists and searches read the disk.")
+	foldersOut  = index.Output("folders", []string{}, "The managed folders, relative to the checkout's root and slash-separated, as the start read them from the settings.")
 )
 
 // New makes the component with its outside reached through o.
@@ -189,7 +190,7 @@ func New(o Options) *Files {
 		o.Watch = OpenWatcher
 	}
 	f := &Files{o: o, model: map[string]File{}}
-	parts := []index.Part{index.IO(), index.Forbids(index.Forbidden{Calls: Forbids, On: "folders"}), modelOut, watchingOut,
+	parts := []index.Part{index.IO(), index.Forbids(index.Forbidden{Calls: Forbids, On: "folders"}), modelOut, watchingOut, foldersOut,
 		index.Config("folders", []string{}, "The managed folders, relative to the checkout's root: each must stand at the start."),
 		index.Config("content-limit", ContentLimit, "The largest file, in bytes, whose content the model holds; a larger one is held by its hash alone."),
 		index.Config("cookie-wait", CookieWait, "How long the watcher has to report the cookie the start writes in each managed folder; one it misses marks the model unwatched, and reads read the disk."),
@@ -262,6 +263,10 @@ func (f *Files) start(instance string, read index.Reader, commit index.Commit) e
 			w.Close()
 			return fmt.Errorf("files: folder %s cannot be watched: %w", folder, err)
 		}
+	}
+	if err := f.commit(foldersOut.Set(append([]string{}, clean...))); err != nil {
+		w.Close()
+		return err
 	}
 	// The watcher opens before the reconcile, so a change during it is heard after it.
 	if err := f.reconcile(); err != nil {

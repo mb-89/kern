@@ -291,6 +291,10 @@ func (d *door) supervise(ctx context.Context) {
 	}
 }
 
+// StateOf is the state a status answers, for Next: the language server's
+// supervisor (package lsp) reads its core so too.
+func StateOf(st host.Status, err error) CoreState { return coreState(st, err) }
+
 // coreState is the state a status answers, for Next.
 func coreState(st host.Status, err error) CoreState {
 	switch {

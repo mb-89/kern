@@ -18,11 +18,15 @@ named in the design's plan.
 | `bus/` | the embedded NATS server on loopback, a user and permissions per component instance, so the bus refuses a second writer | quackitect v5 `src/index/bus.go` |
 | `host/` | the core's process: the standing file, the detached start and its claim file, leases, placements, the idle end | v5 `src/index/detach*.go`, `start.go`, `door.go` |
 | `git/` | kern's git door: every git command kern and SE's Go components run, real git outside tests and the fake (`git/gitfake/`) in them, both held to one contract (`git/contract_test.go`); a test that chose no backend is refused real git, and `SE_GIT_DOOR` picks a process's backend, its `fake:<state file>` read from the state SE's Python fake writes (`git/gitfake/state.go`) | SE's `scripts/git_door.py` |
-| `cli/` | the core's command line, the same for the bare core and every application: `<name> start`, `status`, `stop`, `serve`, `hook`, `mcp` | |
+| `cli/` | the core's command line, the same for the bare core and every application: `<name> start`, `status`, `stop`, `serve`, `hook`, `mcp`, `lint`, `lsp` | |
 | `mcp/` | the MCP door, `<name> mcp`: the catalog's read-only and writing commands as tools over stdio ([The MCP door](#the-mcp-door)) | |
-| `cmd/kern/` | the bare binary: `kern start`, `kern status`, `kern stop`, `kern serve`, `kern hook`, carrying kern's shared components | |
+| `lint/` | the one checker of managed files: each file's template or schema, links that reach nothing, names over their caps; the language server, `<name> lint` and the tests ask it ([Language server](#language-server)) | quackitect v5 `Sweep` |
+| `lsp/` | the language server, `<name> lsp`: the checker's findings as diagnostics over stdio, which an editor starts ([Language server](#language-server)) | quackitect v5 `spec/design_output/lsp.md` |
+| `form/` | the templates: `<name>.json`, its fields' shapes and schema, which the GitHub component fills and renders and the checker holds a rendered file to | `components/github/template.go` |
+| `cmd/kern/` | the bare binary: `kern start`, `kern status`, `kern stop`, `kern serve`, `kern hook`, `kern lint`, `kern lsp`, carrying kern's shared components | |
 | `components/clock/` | the clock: time as names, `time` since its start 10 times a second, and `second`, `minute` and `hour` counting up, which a component reads instead of keeping a timer ([its README](components/clock/README.md)) | |
 | `components/files/` | the files component: the managed folders held in memory as names, reads and searches from the model, compare-and-swap writes, a watcher and a hash reconcile ([Files](#files), [its README](components/files/README.md)) | quackitect v4 `src/engine/indexwatch.go`, v5 `src/modules/files/watch.go` |
+| `components/lsp/` | the lsp component: the checker over the warm model, its findings a name in step with every managed file, and `lsp lint`, which the language server, `<name> lint` and the tests ask ([Language server](#language-server), [its README](components/lsp/README.md)) | quackitect v5 `lsp` I/O module |
 | `components/github/` | the GitHub component: the token and relay backends and the snapshot names ([its README](components/github/README.md)) | the design's step 7 |
 | `components/session/` | the session record, off by default: one JSON line per host event, a file per session under `.se/.runtime/sessions/` ([its README](components/session/README.md)) | |
 | `contract/` | the contract suite: the built binary held to the bus's and the host's promises, and `cases.json` held against the Go fake, the Python fake and the real core with a Python component attached | |
@@ -55,6 +59,8 @@ bare run with `cli.Bare`, and the help renders them all.
 | `kern mcp [--grace D] [--idle D]` | the MCP door over stdio ([The MCP door](#the-mcp-door)): starts the core with the grace and idle given, or attaches to it, and holds a session lease while the client is connected |
 | `kern mcp --tools` | prints the tools the door would serve for the checkout, as `tools/list` answers them, indented JSON in served order, and exits 0: starts no core, takes no lease, reads no input ([The tool list's size](#the-tool-lists-size)) |
 | `kern hook <event> [--wait D] [--unanswered N]` | posts the host's hook JSON from stdin on `hook.<event>`, waiting up to 500 ms for a core whose start's claim stands; prints the answer as the host's hook JSON: a component's deny of the tool call with its reason, in the host's format, exit code 2 and the reason on stderr ([Agent tools](#agent-tools)); else the bound command's output, else the context the components told on `PostToolUse`, `UserPromptSubmit` and `SessionStart` (the [GitHub component](components/github/README.md)'s waiting tool calls) as `additionalContext`, nothing for a `pass` with nothing told; where no core answers, prints nothing; exits 0, or N where no command answered the event and nothing was told |
+| `kern lint [--wait D] [--json]` | starts the core or attaches to it, as `mcp` does, asks the lsp component's `lsp lint` and prints every finding over the managed files, `path:line:col: rule: message`, and their count on stderr, or with `--json` the answer as JSON; exits 1 where there is a finding, 2 where no core runs the checker ([Language server](#language-server)) |
+| `kern lsp [--grace D] [--idle D]` | the language server over stdio, which an editor starts: the checker's findings as diagnostics on every managed file; starts the core with the grace and idle given, or attaches to it, beside the protocol, and holds a session lease while the editor is connected ([Language server](#language-server)) |
 | `kern forbids [--root DIR]` | scans the checkout's components (`components/`) against the forbid lists of the I/O components the binary carries and those declared there ([Forbid lists](#forbid-lists)): each use of another I/O module's entry is a line on stderr, naming the file, the line, the component's folder and the module that owns it, and the exit is 1; else one line on stdout and 0. It starts no core |
 
 - **The standing file**, `.se/.runtime/standing.json`, readable by its owner alone: the bus's
@@ -349,6 +355,78 @@ core answers: with kern down every tool call passes, reads and searches included
 Copilot CLI's hooks reference (docs.github.com, copilot/reference/hooks-reference), VS Code's
 (code.visualstudio.com, docs/agents/reference/hooks-reference) and Claude Code's
 (code.claude.com, docs/en/hooks), each read 2026-11-22.
+
+## Language server
+
+Checks on managed files are served through the Language Server Protocol, the standard every editor
+speaks, and the language server uses the same checker as the tests: opening the files in an editor
+shows exactly what the tests would find. This is the person's decision of 22 Nov, after quackitect
+v5's `lsp` I/O module, whose one checker (`Sweep`) the editor's panel, the command line's `lint`
+and the battery all asked, so there was no second road.
+
+- **One checker.** Package `lint` holds the rules: each managed file's template or schema, links
+  that reach nothing, and names over their caps. The [lsp component](components/lsp/README.md)
+  runs it over the warm model ([Files](#files)), and its command `lsp lint` answers the findings.
+  Three roads ask it: the language server, `<name> lint`, and the tests through
+  `lsptest.Findings(root)`, which runs the checkout's files and lsp instances on an index of their
+  own. `components/lsp/lsp_test.go` holds the three to the same findings over one checkout.
+- **The server.** `<name> lsp` speaks the protocol over stdio. It answers the handshake at once
+  and starts the core, or attaches to it, beside the protocol, as the MCP door does, holding a
+  session lease while the editor is connected. It publishes the findings as diagnostics (an error
+  each, its rule as its code, `kern` as its source) on every managed file, not only the open ones,
+  and an empty list on a file whose findings are gone.
+- **Its redraw roads**, v5's: an open and each typed change check the editor's buffer in place of
+  the file (full sync); a save, a close and a change on the disk check the model, which the files
+  module keeps in step with the disk, and the server hears the lsp instance's `findings` change
+  on the bus (`val.<name>`).
+- **Beside it**, standard servers stay for what they do well: prose (`vale-ls`) and code
+  formatting (Biome). The editor runs them next to `<name> lsp`.
+
+### In VS Code
+
+VS Code starts a language server through an extension of its own, which names the command and the
+documents it serves. The editor runs `<name> lsp` in the folder it opened, the checkout, so the
+server finds the checkout as every verb does; `--root DIR` names another. A minimal extension is two
+files in a folder of their own, with `vscode-languageclient` installed beside them (`npm install
+vscode-languageclient`):
+
+`package.json`:
+
+```json
+{
+  "name": "kern-lsp",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.82.0" },
+  "main": "extension.js",
+  "activationEvents": ["workspaceContains:wiring.toml"],
+  "dependencies": { "vscode-languageclient": "^9.0.1" }
+}
+```
+
+`extension.js`:
+
+```js
+const { LanguageClient } = require("vscode-languageclient/node");
+
+let client;
+
+exports.activate = () => {
+  // kern's own binary is `kern`; an application names its own, such as `se`.
+  client = new LanguageClient("kern", "kern",
+    { command: "kern", args: ["lsp"] },
+    { documentSelector: [{ scheme: "file", language: "markdown" }, { scheme: "file", language: "json" }] });
+  return client.start();
+};
+
+exports.deactivate = () => client && client.stop();
+```
+
+Install it with `code --install-extension` on the folder packed by `npx @vscode/vsce package`, or
+open the folder in VS Code and run it with F5 (an Extension Development Host). The findings show in
+the editor and in the Problems panel, every managed file's, the closed ones too; the open Markdown
+and JSON buffers are checked as typed. The server's own log is the extension's output channel,
+`kern`. Another editor starts it the same way, with the command `<name> lsp` over stdio, such as
+Neovim's `vim.lsp.start({ name = "kern", cmd = { "kern", "lsp" }, root_dir = vim.fs.root(0, ".git") })`.
 
 ## Tests
 
