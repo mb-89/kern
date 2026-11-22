@@ -223,7 +223,7 @@ func Serve(o Options) (*Core, error) {
 			c.types[in.Name][out.Port.Port] = out.Type
 		}
 	}
-	if c.bus, err = bus.StartWith(instances, o.ReplyWait, o.ReplyDefault); err != nil {
+	if c.bus, err = bus.StartWith(instances, o.ReplyWait, o.ReplyDefault, o.Clock.Now); err != nil {
 		return nil, fmt.Errorf("kern serve: %w", err)
 	}
 	if c.nc, err = bus.Dial(c.bus.URL(), bus.Core, c.bus.Users()[bus.Core]); err != nil {

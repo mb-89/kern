@@ -94,14 +94,16 @@ type Bus struct {
 // of every step that runs longer, however it beats, and the core would wait
 // out its step wait in silence.
 func Start(instances []Instance, replyWait time.Duration) (*Bus, error) {
-	return StartWith(instances, replyWait, 0)
+	return StartWith(instances, replyWait, 0, time.Now)
 }
 
 // StartWith is Start with serverDefault, the server's own expiry of a reply
 // permission that names none: zero or less, NATS's two minutes; more, a
 // test's way to shorten the limit the long step guards against
-// (cli.ReplyDefaultEnv), since NATS's own is a constant.
-func StartWith(instances []Instance, replyWait, serverDefault time.Duration) (*Bus, error) {
+// (cli.ReplyDefaultEnv), since NATS's own is a constant. Its wait for the
+// server to accept connections measures readyWithin on the clock now reads:
+// the core hands in its own clock's.
+func StartWith(instances []Instance, replyWait, serverDefault time.Duration, now func() time.Time) (*Bus, error) {
 	users := map[string]string{}
 	var accounts []*server.User
 	add := func(name string, perms *server.Permissions) error {
@@ -135,7 +137,7 @@ func StartWith(instances []Instance, replyWait, serverDefault time.Duration) (*B
 		return nil, fmt.Errorf("bus: %w", err)
 	}
 	go s.Start()
-	if !ready(s) {
+	if !ready(s, now) {
 		s.Shutdown()
 		return nil, fmt.Errorf("bus: the server does not accept connections within %v", readyWithin)
 	}
@@ -144,9 +146,9 @@ func StartWith(instances []Instance, replyWait, serverDefault time.Duration) (*B
 
 // ready looks at the listener in waits short enough that the server does not
 // sleep between looks, so the bus stands as soon as it listens.
-func ready(s *server.Server) bool {
-	end := time.Now().Add(readyWithin)
-	for time.Now().Before(end) {
+func ready(s *server.Server, now func() time.Time) bool {
+	end := now().Add(readyWithin)
+	for now().Before(end) {
 		if s.ReadyForConnections(readyLook) {
 			return true
 		}
