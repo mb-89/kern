@@ -1,0 +1,19 @@
+# What the watcher's tests expect of the issue reads it relies on (README.md "Expectations"). No
+# line names the component that answers them: an I/O module claims them, and its hot test records
+# the real answers beside this file, in watcher.expect.recorded.json (README.md "Hot tests").
+# owner and repo are placeholders: the GitHub hot test reads the checkout's home in their place.
+
+# An issue read names the repository, the issue, when it was read, and its title and state.
+[[expect]]
+name = "github.issue"
+request = "issue"
+ask = { owner = "owner", repo = "repo", number = 1 }
+answer = { repo = "owner/repo", number = 1, read = "2026-11-22T09:00:00Z", data = { title = "a title", state = "open" } }
+exact = ["answer.repo", "answer.number"]
+
+# Once issue 1 is read, the issues name holds it at owner.repo.1.
+[[expect]]
+name = "github.issues"
+port = "issues"
+given = "issue 1 is read"
+value = { "owner.repo.1" = { repo = "owner/repo", number = 1, read = "2026-11-22T09:00:00Z", data = { title = "a title", state = "open" } } }

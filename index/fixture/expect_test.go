@@ -1,6 +1,9 @@
 package fixture_test
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -140,4 +143,45 @@ component = "ledger"
 `))
 	must(t, err)
 	must(t, kerntest.Check(w, kerntest.Module{Component: py, File: pythonTally}, counter(), ledger()))
+}
+
+// The watcher's test is answered from the GitHub hot test's recordings
+// beside its file (watcher.expect.recorded.json, README.md "Hot tests"):
+// the real title and state of the issue read, not the ones its file states.
+func TestWatchersTestIsAnsweredFromTheHotTestsRecordings(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile("watcher.expect.recorded.json")
+	must(t, err)
+	var recs struct {
+		Recordings []struct {
+			Expect int `json:"expect"`
+			Answer struct {
+				Data fixture.IssueData `json:"data"`
+			} `json:"answer"`
+		} `json:"recordings"`
+	}
+	must(t, json.Unmarshal(data, &recs))
+	var real fixture.IssueData
+	for _, r := range recs.Recordings {
+		if r.Expect == 1 {
+			real = r.Answer.Data
+		}
+	}
+	if real.Title == "" || real.Title == "a title" {
+		t.Fatalf("no real issue is recorded: %+v", recs)
+	}
+	f, err := kerntest.Expecting(fixture.Watcher, "watcher.expect.toml")
+	must(t, err)
+	for _, line := range f.Stale() {
+		t.Log(line)
+	}
+	want := "owner/repo issue 1 " + real.State + ": " + real.Title
+	if text, err := f.Call("watch", "owner", "repo", "1"); err != nil || text != want {
+		t.Fatalf("watch answered %q, %v, want %q", text, err, want)
+	}
+	must(t, f.Given("issue 1 is read"))
+	must(t, f.Derive("titles"))
+	if got, _ := f.Out("titles"); fmt.Sprint(got.V) != "[1 "+real.State+": "+real.Title+"]" {
+		t.Fatalf("given issue 1 is read, titles is %+v", got)
+	}
 }

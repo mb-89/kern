@@ -1,0 +1,44 @@
+{
+  "recordings": [
+    {
+      "expect": 1,
+      "name": "github.issue",
+      "request": "issue",
+      "ask": {
+        "number": 1,
+        "owner": "owner",
+        "repo": "repo"
+      },
+      "hot": "github",
+      "at": "2026-11-22T17:33:25Z",
+      "answer": {
+        "data": {
+          "state": "closed",
+          "title": "beat-joins-at-step-end"
+        },
+        "number": 1,
+        "read": "2026-11-22T17:33:25.224432618Z",
+        "repo": "owner/repo"
+      }
+    },
+    {
+      "expect": 2,
+      "name": "github.issues",
+      "port": "issues",
+      "given": "issue 1 is read",
+      "hot": "github",
+      "at": "2026-11-22T17:33:24Z",
+      "value": {
+        "owner.repo.1": {
+          "data": {
+            "state": "closed",
+            "title": "beat-joins-at-step-end"
+          },
+          "number": 1,
+          "read": "2026-11-22T17:33:24.866960107Z",
+          "repo": "owner/repo"
+        }
+      }
+    }
+  ]
+}

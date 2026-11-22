@@ -119,6 +119,24 @@ An outbox entry stands at `<verb>.<key>`, a step's at `step.<tool>.<hash of its 
 off with `enabled = false`: it then looks for no token and hears nothing, and its names read their
 built-in values.
 
+## Claims and its hot test
+
+`expect.toml` claims `github.issues` and the read verbs' requests, `github.issue`, `github.pull`,
+`github.check-runs`, `github.comment-list`, `github.issue-list` and `github.pull-list`; `step`,
+which only the relay runs, is claimed by none. `hot_test.go` meets every expectation the
+checkout's readers pool under them, against the fake REST server in the normal suite and against
+GitHub itself in its hot test (kern's README "Hot tests"):
+
+```sh
+KERN_HOT=1 go test -count=1 -run '^TestHot$' ./components/github/
+```
+
+It reads the checkout's home from its origin and the token the component finds
+(`KERN_HOT_GITHUB_API` names another API). A reader's ask names the owner `owner` and the
+repository `repo`, which the hot test asks as the home's; every answer is written back with the
+home as `owner/repo` and `owner.repo`, so no recording names it. The given `issue 1 is read` reads
+the home's issue 1.
+
 ## Tests
 
 `github_test.go` and `lists_test.go` hold both backends to fakes: the token backend to a fake REST

@@ -26,6 +26,17 @@ func (p inletPart) declare(c *Component) {
 // error refuses the start.
 func Inlet(fn func(instance string, read Reader, commit Commit) error) Part { return inletPart{fn} }
 
+// Start runs the component's inlet for one instance, as the index's start
+// does, with read as its config reader and commit as its own commit: a fake
+// core starts an I/O component so. A component that declares no inlet starts
+// with nothing to do.
+func (c *Component) Start(instance string, read Reader, commit Commit) error {
+	if c.inlet == nil {
+		return nil
+	}
+	return c.inlet(instance, read, commit)
+}
+
 type hearsPart struct {
 	fn func(instance, event string, payload []byte) error
 }
