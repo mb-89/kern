@@ -21,7 +21,17 @@ found, else the relay. `token` without one refuses the start.
 - **The token backend** keeps each path's ETag and answer, so a read of an unchanged one is
   answered `304` and costs no quota. A list read is paged, 100 items a page, and each page keeps
   its own ETag, so an unchanged page costs no quota either. Every `refresh` (2 minutes) it reads
-  each snapshot and list it holds again, each page with its ETag.
+  each snapshot and list it holds again, each page with its ETag. It keeps no timer: its input
+  `second` reads the [clock](../clock/README.md)'s `clock/second`, a count of seconds, and on each
+  count a `clock.Relay` returns at once until `refresh`, in whole seconds, has passed in counts
+  since the last refresh.
+  The refresh then runs on its own, so a slow GitHub never holds the clock, and a second that
+  comes while one still runs starts none. A wiring that leaves `second` built-in refreshes
+  nothing.
+- **Its waits.** Every wait, `relay-wait`, `step-wait`, `tell-wait`, the pacing below and each REST
+  request's limit (`RequestWait`, 30 s, its body read included), measures
+  against the host's clock (`host.Clock`), `Options.Clock`, so a test drives each with a clock it
+  moves and never waits.
 - **Its pacing.** A `429`, or a `403` with `Retry-After` or `X-RateLimit-Remaining: 0`, is a rate
   limit. The backend waits what `Retry-After` asks, else until the quota's reset, else a minute,
   and every read waits with it, a later page of a list among them. It sends a page four times at
@@ -104,6 +114,7 @@ component = "github"
 # config = { backend = "auto", refresh = "2m", relay-wait = "0s", pace-max = "60s", step-wait = "60m", tell-wait = "300ms" }
 
 [wires]
+"github.second" = "clock/second"          # the refresh's count of seconds; "built-in" refreshes nothing
 "github.issues" = "github/issues/<key>"
 "github.pulls" = "github/pulls/<key>"
 "github.checks" = "github/checks/<key>"
@@ -140,7 +151,7 @@ the home's issue 1.
 ## Tests
 
 `github_test.go` and `lists_test.go` hold both backends to fakes: the token backend to a fake REST
-server (per-page ETags, the refresh, a check-runs read at the head, each kind of rate limit on a
+server (per-page ETags, the refresh driven by a second's count the case writes, a check-runs read at the head, each kind of rate limit on a
 single read and on a later page, paged issue, pull-request and comment reads), the relay to
 PostToolUse payloads shaped as a cloud session's hook hands them (list_issues' cursor pages,
 list_pull_requests' and get_comments' numbered pages, a list heard whole without being asked), and

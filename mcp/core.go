@@ -70,7 +70,7 @@ func (h Host) request(ctx context.Context, subject string, body, v any) error {
 }
 
 func (h Host) Lease(session string, end bool) error {
-	ctx, cancel := context.WithTimeout(context.Background(), leaseWait)
+	ctx, cancel := host.Within(context.Background(), host.Wall{}, leaseWait)
 	defer cancel()
 	var got struct {
 		Error string `json:"error"`

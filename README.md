@@ -21,6 +21,7 @@ named in the design's plan.
 | `cli/` | the core's command line, the same for the bare core and every application: `<name> start`, `status`, `stop`, `serve`, `hook`, `mcp` | |
 | `mcp/` | the MCP door, `<name> mcp`: the catalog's read-only commands as tools over stdio ([The MCP door](#the-mcp-door)) | |
 | `cmd/kern/` | the bare binary: `kern start`, `kern status`, `kern stop`, `kern serve`, `kern hook`, carrying kern's shared components | |
+| `components/clock/` | the clock: time as names, `time` since its start 10 times a second, and `second`, `minute` and `hour` counting up, which a component reads instead of keeping a timer ([its README](components/clock/README.md)) | |
 | `components/github/` | the GitHub component: the token and relay backends and the snapshot names ([its README](components/github/README.md)) | the design's step 7 |
 | `components/session/` | the session record, off by default: one JSON line per host event, a file per session under `.se/.runtime/sessions/` ([its README](components/session/README.md)) | |
 | `contract/` | the contract suite: the built binary held to the bus's and the host's promises, and `cases.json` held against the Go fake, the Python fake and the real core with a Python component attached | |
@@ -83,6 +84,12 @@ bare run with `cli.Bare`, and the help renders them all.
   - The [session record](components/session/README.md) hears every event and appends it to a
     file per session. It runs only where the checkout's ignored overlay `.se/wiring.toml` holds
     `[instances.session]` with `component = "session"`, after a restart of the core.
+- **Time is an I/O module.** The [clock](components/clock/README.md) writes `time`, the time since
+  its start, 10 times a second, and `second`, `minute` and `hour`, counters that count up. A
+  component that acts on time reads the counter it needs (`index.Reacts`) and keeps its interval
+  with a `clock.Relay` over its count, as the GitHub component's refresh does; no component keeps
+  a timer of its own. Every wait for an answer measures its limit
+  against the host's clock (`host.Clock`), which a test replaces with a clock it moves itself.
 - **Hooks a command answers.** The wiring's `[hooks]` binds a host's event to a command, such as
   `Stop = "work_tickets.py stop-check"`; the core refuses to start where no instance declares it.
   The core runs it with one argument, `--hook=` and the event's JSON, and answers the effect

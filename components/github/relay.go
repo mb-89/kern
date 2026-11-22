@@ -24,7 +24,7 @@ const PostToolUse = "PostToolUse"
 // one in time it fails, naming the step the outbox holds then (a paged
 // read's next page), and the step stays until an answer lands.
 func (g *GitHub) ask(verb, key, ob string, step Step) (any, error) {
-	now := g.o.Now()
+	now := g.o.Clock.Now()
 	g.mu.Lock()
 	if v, ok := g.last[ob]; ok && now.Sub(readOf(v)) < g.fresh {
 		g.mu.Unlock()
@@ -43,12 +43,10 @@ func (g *GitHub) ask(verb, key, ob string, step Step) (any, error) {
 			return nil, err
 		}
 	}
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
 	select {
 	case v := <-answer:
 		return v, nil
-	case <-timer.C:
+	case <-g.o.Clock.After(wait):
 	}
 	g.mu.Lock()
 	if s, ok := g.outbox[ob]; ok {
@@ -217,9 +215,9 @@ func (g *GitHub) hear(instance, event string, payload []byte) error {
 		data, err := answerOf(use.Response)
 		if err == nil {
 			err = g.hearPage(listOutboxKey(l, r), use.Input, data,
-				func(next map[string]any) Step { return listStepOf(l, r, g.o.Now(), next) },
+				func(next map[string]any) Step { return listStepOf(l, r, g.o.Clock.Now(), next) },
 				func(items []any) (index.Write, any) {
-					list := List{Repo: repoOf(r.Owner, r.Repo), State: r.State, Labels: r.Labels, Read: g.o.Now().UTC(), Via: Relay, Data: items}
+					list := List{Repo: repoOf(r.Owner, r.Repo), State: r.State, Labels: r.Labels, Read: g.o.Clock.Now().UTC(), Via: Relay, Data: items}
 					return l.out().At(ListKey(r), list), list
 				})
 		}
@@ -236,18 +234,18 @@ func (g *GitHub) hear(instance, event string, payload []byte) error {
 	if err == nil && k.paged {
 		err = g.hearPage(outboxKey(k, r), use.Input, data,
 			func(next map[string]any) Step {
-				s := stepOf(k, r, g.o.Now())
+				s := stepOf(k, r, g.o.Clock.Now())
 				for n, v := range next {
 					s.Input[n] = v
 				}
 				return s
 			},
 			func(items []any) (index.Write, any) {
-				s := Snapshot{Repo: repoOf(r.Owner, r.Repo), Number: r.Number, Read: g.o.Now().UTC(), Via: Relay, Data: items}
+				s := Snapshot{Repo: repoOf(r.Owner, r.Repo), Number: r.Number, Read: g.o.Clock.Now().UTC(), Via: Relay, Data: items}
 				return k.out().At(Key(r), s), s
 			})
 	} else if err == nil {
-		s := Snapshot{Repo: repoOf(r.Owner, r.Repo), Number: r.Number, Read: g.o.Now().UTC(), Via: Relay, Data: data}
+		s := Snapshot{Repo: repoOf(r.Owner, r.Repo), Number: r.Number, Read: g.o.Clock.Now().UTC(), Via: Relay, Data: data}
 		err = g.land(outboxKey(k, r), k.out().At(Key(r), s), s)
 	}
 	if err != nil {
@@ -438,7 +436,7 @@ func (g *GitHub) step(ctx context.Context, a StepAsk) (StepAnswer, error) {
 		}
 	}
 	key := StepKey(a)
-	now := g.o.Now().UTC()
+	now := g.o.Clock.Now().UTC()
 	w := &waitingStep{ask: a, asked: now, number: numberOf(a.Note), answer: make(chan stepResult, 1)}
 	g.mu.Lock()
 	if _, taken := g.steps[key]; taken {
@@ -455,15 +453,13 @@ func (g *GitHub) step(ctx context.Context, a StepAsk) (StepAnswer, error) {
 	case g.asked <- struct{}{}:
 	default:
 	}
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
 	select {
 	case r := <-w.answer:
 		return r.a, r.err
 	case <-ctx.Done():
 		g.drop(key)
 		return StepAnswer{}, fmt.Errorf("github step %s: its call is given up: %w; outbox step %s dropped", a.Tool, context.Cause(ctx), key)
-	case <-timer.C:
+	case <-g.o.Clock.After(wait):
 	}
 	g.drop(key)
 	in, _ := json.Marshal(a.Input)
@@ -516,7 +512,7 @@ func (g *GitHub) answerStep(use toolUse) bool {
 	if err != nil {
 		err = fmt.Errorf("github step %s: %w", bare, err)
 	}
-	w.answer <- stepResult{StepAnswer{Tool: bare, Input: use.Input, Read: g.o.Now().UTC(), Data: data}, err}
+	w.answer <- stepResult{StepAnswer{Tool: bare, Input: use.Input, Read: g.o.Clock.Now().UTC(), Data: data}, err}
 	return true
 }
 
@@ -654,12 +650,10 @@ func (g *GitHub) tell(_ string, event string, payload []byte) string {
 		return stale
 	}
 	if answered {
-		timer := time.NewTimer(wait)
 		select {
 		case <-g.asked:
-		case <-timer.C:
+		case <-g.o.Clock.After(wait):
 		}
-		timer.Stop()
 	}
 	return g.Outbox()
 }

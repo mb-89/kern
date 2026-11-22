@@ -32,12 +32,12 @@ func Post(clock Clock, root, event string, payload []byte, wait time.Duration) (
 	if !word(event) {
 		return HookAnswer{}, fmt.Errorf("kern hook %q: %w", event, ErrNoEvent)
 	}
-	end := time.Now().Add(wait)
+	end := clock.Now().Add(wait)
 	s, err := awaitStanding(clock, root, end, func() { time.Sleep(standingLook) })
 	if err != nil {
 		return HookAnswer{}, err
 	}
-	left := time.Until(end)
+	left := end.Sub(clock.Now())
 	if left <= 0 {
 		return HookAnswer{}, fmt.Errorf("kern hook %s: no answer within %v", event, wait)
 	}
@@ -46,7 +46,7 @@ func Post(clock Clock, root, event string, payload []byte, wait time.Duration) (
 		return HookAnswer{}, err
 	}
 	defer nc.Close()
-	m, err := nc.Request(bus.Hook+event, payload, time.Until(end))
+	m, err := nc.Request(bus.Hook+event, payload, end.Sub(clock.Now()))
 	if err != nil {
 		return HookAnswer{}, fmt.Errorf("kern hook %s: %w", event, err)
 	}
@@ -67,7 +67,7 @@ func awaitStanding(clock Clock, root string, end time.Time, look func()) (Standi
 	for {
 		claimed := starting(clock, root)
 		s, err := ReadStanding(root)
-		if !errors.Is(err, ErrNotRunning) || !claimed || !time.Now().Before(end) {
+		if !errors.Is(err, ErrNotRunning) || !claimed || !clock.Now().Before(end) {
 			return s, err
 		}
 		look()

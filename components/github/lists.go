@@ -106,7 +106,7 @@ func (g *GitHub) list(l listKind, r ListRef) (List, error) {
 	case Token:
 		return g.listToken(rest, l, r)
 	case Relay:
-		v, err := g.ask(l.verb, ListKey(r), listOutboxKey(l, r), listStepOf(l, r, g.o.Now(), nil))
+		v, err := g.ask(l.verb, ListKey(r), listOutboxKey(l, r), listStepOf(l, r, g.o.Clock.Now(), nil))
 		list, _ := v.(List)
 		return list, err
 	}
@@ -129,7 +129,7 @@ func (g *GitHub) listToken(rest *rest, l listKind, r ListRef) (List, error) {
 	if err != nil {
 		return List{}, fmt.Errorf("github %s %s: %w", l.verb, ListKey(r), err)
 	}
-	list := List{Repo: repoOf(r.Owner, r.Repo), State: r.State, Labels: r.Labels, Read: g.o.Now().UTC(), Via: Token, Data: items}
+	list := List{Repo: repoOf(r.Owner, r.Repo), State: r.State, Labels: r.Labels, Read: g.o.Clock.Now().UTC(), Via: Token, Data: items}
 	ob := listOutboxKey(l, r)
 	g.mu.Lock()
 	g.held[ob] = func() { _, _ = g.listToken(rest, l, r) }

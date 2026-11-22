@@ -69,6 +69,9 @@ type Options struct {
 	NoStart string
 	// StartWait and Renew replace the built-in spans where set.
 	StartWait, Renew time.Duration
+	// Clock is what the supervisor's waits and a call's wait for its core
+	// measure against: the wall clock where none is given.
+	Clock host.Clock
 	// PageLimit replaces the built-in PageLimit where set.
 	PageLimit int
 	// Log takes what the door says beside the protocol: stderr.
@@ -108,6 +111,9 @@ func Serve(ctx context.Context, o Options, in io.ReadCloser, out io.WriteCloser)
 	}
 	if o.Log == nil {
 		o.Log = io.Discard
+	}
+	if o.Clock == nil {
+		o.Clock = host.Wall{}
 	}
 	if o.Session == "" {
 		o.Session = fmt.Sprintf("mcp-%d-%d", os.Getpid(), time.Now().UnixNano())
@@ -277,7 +283,7 @@ func (d *door) supervise(ctx context.Context) {
 			return
 		case <-wake:
 			asked = true
-		case <-time.After(step.Wait):
+		case <-d.o.Clock.After(step.Wait):
 		}
 	}
 }
@@ -345,13 +351,13 @@ func (d *door) await(ctx context.Context) (host.Status, *sdk.CallToolResult) {
 		return host.Status{}, failure(NoCheckout, fmt.Sprintf("%s mcp runs in %s, which is no checkout (no .git): it starts no core there", o.App, o.Root),
 			"configure the server to run in the repository's folder (its cwd), or pass --root <checkout>")
 	}
-	end := time.Now().Add(o.StartWait)
+	end := o.Clock.Now().Add(o.StartWait)
 	asked := false
 	for {
 		leased := d.leased.Load() // before the status, so a running core's health shows the lease
 		st, err := o.Core.Status()
 		running := err == nil && st.State == host.StateRunning
-		if running && (leased || !time.Now().Before(end)) {
+		if running && (leased || !o.Clock.Now().Before(end)) {
 			// Every call renews the session's lease, beside the supervisor's renewal.
 			if err := o.Core.Lease(o.Session, false); err != nil {
 				fmt.Fprintf(o.Log, "%s mcp: renewing the lease: %v\n", o.App, err)
@@ -366,7 +372,7 @@ func (d *door) await(ctx context.Context) (host.Status, *sdk.CallToolResult) {
 			d.ask() // the supervisor starts a core that is gone at once
 			asked = true
 		}
-		if !time.Now().Before(end) || ctx.Err() != nil {
+		if !o.Clock.Now().Before(end) || ctx.Err() != nil {
 			if !d.inFlight.Load() && (err != nil || st.State != host.StateStarting) {
 				why := "no core runs and none is starting"
 				if err != nil {
@@ -380,7 +386,7 @@ func (d *door) await(ctx context.Context) (host.Status, *sdk.CallToolResult) {
 		}
 		select {
 		case <-ctx.Done():
-		case <-time.After(look):
+		case <-o.Clock.After(look):
 		}
 	}
 }
@@ -440,7 +446,7 @@ func (d *door) call(ctx context.Context, t Tool, raw json.RawMessage) *sdk.CallT
 }
 
 func (d *door) run(ctx context.Context, command string, args []string) (host.CallAnswer, error) {
-	ctx, cancel := context.WithTimeout(ctx, callWait)
+	ctx, cancel := host.Within(ctx, d.o.Clock, callWait)
 	defer cancel()
 	return d.o.Core.Call(ctx, command, args)
 }
