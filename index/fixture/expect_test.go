@@ -77,7 +77,7 @@ func ledger() kerntest.Module {
 // reports each pending one without failing.
 func meet(t *testing.T, m kerntest.Module, pool kerntest.Pool) {
 	t.Helper()
-	pending, err := m.Meet(pool)
+	pending, err := m.MeetPending(pool)
 	for _, p := range pending {
 		t.Log(p)
 	}

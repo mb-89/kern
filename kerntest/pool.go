@@ -68,11 +68,18 @@ func (m Module) read() (Expectations, error) {
 }
 
 // Meet holds m to every expectation in pool on the names it claims: each in a
-// fake of its own, after the setup of its given. It fails on each one m does
+// fake of its own, after the setup of its given. It answers each one m does
 // not meet, naming the name, the expectation and the reader's file, except a
-// new one, which is pending: it answers those apart, for its test to report,
-// and appends them to ReportVariable's file, where it is set.
-func (m Module) Meet(pool Pool) ([]Pending, error) {
+// new one, which is pending and fails nothing (MeetPending).
+func (m Module) Meet(pool Pool) error {
+	_, err := m.MeetPending(pool)
+	return err
+}
+
+// MeetPending is Meet that also answers the pending expectations, for the
+// writer's test to report, and appends each to ReportVariable's file, where
+// it is set.
+func (m Module) MeetPending(pool Pool) ([]Pending, error) {
 	x, err := m.read()
 	if err != nil {
 		return nil, err

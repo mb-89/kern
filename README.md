@@ -325,10 +325,10 @@ person's decision of 22 Nov (deck "Who provides the fakes", option B), after Pac
   landed; a file the base lacks is new throughout. `kerntest.ReadPoolSince(base, files...)` and
   `kerntest.CheckSince(base, wiring, modules...)` take the base as a `kerntest.Base`, and
   `kerntest.GitBase(backend, ref)` is the one `KERN_EXPECT_BASE` names.
-- **The claimer's test** stays green: `Module.Meet(pool)` answers the pending expectations apart
-  from its error, each a line `pending: name "numbers": expect 6 (port numbers, given "four numbers
-  stand") of tally.expect.toml waits on counter, which does not meet it yet: <why>`, which the test
-  logs. A landed expectation it does not meet fails it as `unmet`, as before.
+- **The claimer's test** stays green: `Module.Meet(pool)` fails only on landed expectations, as
+  `unmet`, and `Module.MeetPending(pool)` also answers the pending ones, each a line `pending: name
+  "numbers": expect 6 (port numbers, given "four numbers stand") of tally.expect.toml waits on
+  counter, which does not meet it yet: <why>`, which the test logs.
 - **The reader's check** refuses the change with the same line, naming the claimer that must meet
   it. Once the claimer meets it, the two land and the expectation is an ordinary one.
 - **In Python**, `kern.pool.read_pool(files..., base=...)`, `Module(...).meet(pool)`, which answers

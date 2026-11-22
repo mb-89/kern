@@ -53,7 +53,7 @@ func TestANewUnmetExpectationIsPendingInItsClaimersTest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending, err := count.Meet(pool)
+	pending, err := count.MeetPending(pool)
 	if err != nil {
 		t.Fatalf("a new expectation failed its claimer's test: %v", err)
 	}
@@ -62,7 +62,10 @@ func TestANewUnmetExpectationIsPendingInItsClaimersTest(t *testing.T) {
 	if len(pending) != 1 || pending[0].String() != want {
 		t.Fatalf("counter's test reported %v, want one line %q", pending, want)
 	}
-	if pending, err := ledger.Meet(pool); err != nil || len(pending) != 0 {
+	if err := count.Meet(pool); err != nil {
+		t.Errorf("Meet failed on a pending expectation: %v", err)
+	}
+	if pending, err := ledger.MeetPending(pool); err != nil || len(pending) != 0 {
 		t.Errorf("ledger, which claims no numbers, answered %v, %v", pending, err)
 	}
 }
@@ -95,7 +98,7 @@ func TestOnceItsClaimerMeetsItFailingItFailsTheClaimer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pending, err := count.Meet(pool); err != nil || len(pending) != 0 {
+	if pending, err := count.MeetPending(pool); err != nil || len(pending) != 0 {
 		t.Fatalf("a counter that meets the new wish answered %v, %v", pending, err)
 	}
 	// Landed, it is an ordinary expectation: a counter that stops meeting it fails.
@@ -105,7 +108,7 @@ func TestOnceItsClaimerMeetsItFailingItFailsTheClaimer(t *testing.T) {
 		t.Fatal(err)
 	}
 	count.Given["four numbers stand"] = func(f *kerntest.Fake) error { return f.Config("upto", 5) }
-	pending, err := count.Meet(pool)
+	pending, err := count.MeetPending(pool)
 	if want := `unmet: name "numbers": counter does not meet expect 6 (port numbers, given "four numbers stand") of ` + reader.File; err == nil || !strings.Contains(err.Error(), want) || len(pending) != 0 {
 		t.Fatalf("a counter that broke a landed expectation answered %v, %v; want %q", pending, err, want)
 	}
@@ -130,7 +133,7 @@ func TestAnExpectationStaysLandedWhereItMovesInItsFile(t *testing.T) {
 		}
 	}
 	count.Given = nil
-	if pending, err := count.Meet(pool); err == nil || len(pending) != 0 {
+	if pending, err := count.MeetPending(pool); err == nil || len(pending) != 0 {
 		t.Errorf("a moved expectation counter breaks is pending: %v, %v", pending, err)
 	}
 }
@@ -142,7 +145,7 @@ func TestWithNoBaseEveryExpectationCountsAsLanded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pending, err := count.Meet(pool); err == nil || len(pending) != 0 {
+	if pending, err := count.MeetPending(pool); err == nil || len(pending) != 0 {
 		t.Errorf("with no base, an unmet expectation is pending: %v, %v", pending, err)
 	}
 }
@@ -156,7 +159,7 @@ func TestAPendingExpectationIsAppendedToTheReportFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := count.Meet(pool); err != nil {
+	if _, err := count.MeetPending(pool); err != nil {
 		t.Fatal(err)
 	}
 	if err := kerntest.CheckSince(base, wiring(t, "reader", "counter", "lines"), reader, count, ledger); err == nil {
