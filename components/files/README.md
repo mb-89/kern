@@ -90,6 +90,15 @@ Reused from quackitect v4 (`src/engine/indexwatch.go`) and v5 (`src/modules/file
   host's clock (`host.Clock`), the model is unwatched: `watching` stays false, the cookies are
   removed, and `read` reads the disk, and `list` and `search` reconcile first, the cold path.
 
+## The forbid list
+
+Every I/O module declares what only it may use (kern#18). The files module's list is
+`files.Forbids`: the direct file writes of Go's package `os` and their Python counterparts. They
+are forbidden to every other component on the managed folders. Since the folders are a setting, a
+check of a call names the call and the managed folders it may reach. kern#18's check reads the
+list once it lands; `TestTheForbidListNamesTheModulesOwnWrites` holds it to every write of package
+`os` the module makes itself.
+
 ## Tests
 
 `files_test.go` drives the module with a watcher the case feeds by hand and a clock it fires, over

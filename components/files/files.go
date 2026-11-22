@@ -58,6 +58,17 @@ const MaxMatches = 1000
 // stays under the bus's cap (quackitect v5 src/modules/files/watch.go).
 const seedBatch = 8 << 20
 
+// Forbids is the files module's forbid list (kern#18): the direct file
+// writes that only it may make on a managed folder, Go's and Python's. Since
+// the folders are a setting, another component's use of one is a write past
+// the model wherever it reaches a managed folder; kern#18's check reads the
+// list once it lands.
+var Forbids = []string{
+	"os.WriteFile", "os.Create", "os.CreateTemp", "os.OpenFile", "os.Rename", "os.Remove", "os.RemoveAll",
+	"os.Mkdir", "os.MkdirAll", "os.Truncate", "os.Chmod", "os.Symlink", "os.Link",
+	"pathlib.Path.write_text", "pathlib.Path.write_bytes", "pathlib.Path.unlink", "os.replace", "shutil.move",
+}
+
 // skipped are the folders inside a managed folder the model never enters.
 var skipped = map[string]bool{".git": true, "node_modules": true}
 

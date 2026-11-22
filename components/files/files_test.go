@@ -1,8 +1,12 @@
 package files_test
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -509,4 +513,28 @@ func TestTheModuleMeetsThePooledExpectations(t *testing.T) {
 	if err := m.Meet(p); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// The forbid list names every write of package os the module makes itself,
+// so no write it makes on a managed folder is left to another component.
+func TestTheForbidListNamesTheModulesOwnWrites(t *testing.T) {
+	t.Parallel()
+	reads := map[string]bool{"Stat": true, "Lstat": true, "ReadFile": true, "ReadDir": true, "Getwd": true, "IsNotExist": true, "FileMode": true}
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "files.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ast.Inspect(file, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "os" && !reads[sel.Sel.Name] {
+			if !slices.Contains(files.Forbids, "os."+sel.Sel.Name) {
+				t.Errorf("%s: the module writes with os.%s, which its forbid list does not name", fset.Position(sel.Pos()), sel.Sel.Name)
+			}
+		}
+		return true
+	})
 }
