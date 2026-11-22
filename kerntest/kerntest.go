@@ -18,6 +18,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	"kern/host"
 	"kern/index"
@@ -43,6 +44,11 @@ type Fake struct {
 	// own expectations, under the givens its test names.
 	expect *Expectations
 	givens map[string]bool
+	// recorded are the hot tests' recordings beside the expectation file,
+	// by the place of the expectation each answers, and stale the lines
+	// naming those older than their set age.
+	recorded map[int]Recording
+	stale    []string
 }
 
 // New takes a component, and refuses a broken declaration as the index's start would.
@@ -74,7 +80,17 @@ func New(c *index.Component) (*Fake, error) {
 // expectation states, and each request gets the answer or the refusal of the
 // expectation whose ask it matches, under the givens Given names. Seed and
 // Answer are refused, so no test fakes the component on the other side.
-func Expecting(c *index.Component, path string) (*Fake, error) {
+//
+// Where an I/O module's hot test recorded the real answer to an expectation
+// beside path (RecordingsFile), the fake answers with the recording instead
+// of the value the expectation states; it refuses a recording that no longer
+// fits its expectation, and Stale names each older than MaxAge (README.md
+// "Hot tests").
+func Expecting(c *index.Component, path string, opts ...Option) (*Fake, error) {
+	o := options{now: time.Now, maxAge: RecordingAge}
+	for _, opt := range opts {
+		opt(&o)
+	}
 	f, err := New(c)
 	if err != nil {
 		return nil, err
@@ -86,8 +102,27 @@ func Expecting(c *index.Component, path string) (*Fake, error) {
 	if err := x.Check(c); err != nil {
 		return nil, err
 	}
-	f.expect = &x
+	recs, err := ReadRecordings(x)
+	if err != nil {
+		return nil, err
+	}
+	f.expect, f.recorded, f.stale = &x, recs, staleOf(x, recs, o.now(), o.maxAge)
 	return f, f.Given()
+}
+
+// stated answers what e states the port reads or the request is answered:
+// its recording's where a hot test recorded one, else its own.
+func (f *Fake) stated(e Expectation) any {
+	if r, ok := f.recorded[e.N]; ok {
+		if e.Port != "" {
+			return r.Value
+		}
+		return r.Answer
+	}
+	if e.Port != "" {
+		return e.Value
+	}
+	return e.Answer
 }
 
 // Given names the preconditions the test runs under: each input port reads
@@ -129,7 +164,7 @@ func (f *Fake) Given(givens ...string) error {
 	}
 	seeds := map[string]any{}
 	for port, e := range from {
-		v, err := convert(e.Value, f.inputs[port].Type)
+		v, err := convert(f.stated(e), f.inputs[port].Type)
 		if err != nil {
 			return fmt.Errorf("%s: %s: value: %w", file, e, err)
 		}
@@ -173,8 +208,26 @@ func (f *Fake) seed(port string, v any) error {
 	return nil
 }
 
-// Config sets a config key's value; one it never sets is the key's built-in value.
-func (f *Fake) Config(key string, v any) error { return f.seed(index.ConfigPrefix+key, v) }
+// Config sets a config key's value; one it never sets is the key's built-in
+// value. A key the component declares and no command reads is set too, for
+// its inlet (Start).
+func (f *Fake) Config(key string, v any) error {
+	port := index.ConfigPrefix + key
+	if _, ok := f.inputs[port]; !ok {
+		for _, k := range f.c.Config() {
+			if k.Port == key {
+				if !index.Fits(v, k.Type) {
+					return fmt.Errorf("config %s takes %s, not %T", key, k.Type, v)
+				}
+				f.mu.Lock()
+				f.seeded[port] = v
+				f.mu.Unlock()
+				return nil
+			}
+		}
+	}
+	return f.seed(port, v)
+}
 
 // Answer hands a request port the answerer of every request made on it. A
 // fake made with Expecting refuses it: the answer is stated in the
@@ -190,6 +243,27 @@ func (f *Fake) Answer(port string, a Answerer) error {
 	f.answers[port] = a
 	f.mu.Unlock()
 	return nil
+}
+
+// Start runs the component's inlet as the core's start does, for instance:
+// it reads the fake's config, and what it commits joins the fake's outputs,
+// held to its declaration. An I/O module's setup starts it so.
+func (f *Fake) Start(instance string) error {
+	return f.c.Start(instance, f.read, func(writes ...index.Write) error {
+		if err := f.c.CheckWrites(writes); err != nil {
+			return err
+		}
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		for _, w := range writes {
+			if w.Gone {
+				delete(f.out, at(w.Port, w.Key))
+				continue
+			}
+			f.out[at(w.Port, w.Key)] = w.Value
+		}
+		return nil
+	})
 }
 
 // Derive runs the derivation of an output and commits what it answers.
@@ -407,7 +481,7 @@ func (f *Fake) expected(a index.Ask) (any, error) {
 			if e.Refused {
 				return nil, fmt.Errorf("refused, as %s of %s expects", e, f.expect.File)
 			}
-			return convert(e.Answer, f.requests[a.Port].Ans)
+			return convert(f.stated(e), f.requests[a.Port].Ans)
 		}
 	}
 	return nil, fmt.Errorf("%s: no expectation answers the request %s on port %s: state it there", f.expect.File, show(a.Value), a.Port)
