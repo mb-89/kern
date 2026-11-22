@@ -1,5 +1,5 @@
 {
-  "about": "Declarations both readers refuse alike: index.ParseDeclaration in Go, kern.declaration.parse in Python. Each refusal is a list of the substrings its message holds; hash pins the declaration hash of a text, its CRLF read as LF.",
+  "about": "Declarations both readers refuse alike: index.ParseDeclaration in Go, kern.declaration.parse in Python. Each refusal is a list of the substrings its message holds; taken are declarations both read alike, with the forbid list each reads; hash pins the declaration hash of a text, its CRLF read as LF.",
   "refused": [
     {"name": "another contract version", "text": "name = \"x\"\ncontract = 2\nhelp = \"h\"\n", "error": ["contract is 2", "contract = 1"]},
     {"name": "no contract", "text": "name = \"x\"\nhelp = \"h\"\n", "error": ["contract = 1"]},
@@ -12,7 +12,16 @@
     {"name": "a read-only that is no flag", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[commands.\"x look\"]\nusage = \"x look\"\nsummary = \"s\"\ngroup = \"g\"\nhelp = \"h\"\nclass = \"interactive\"\nread-only = \"yes\"\nmcp = \"Looks.\"\n", "error": ["read-only is true or false"]},
     {"name": "a command without a usage", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[commands.\"x go\"]\nsummary = \"s\"\ngroup = \"g\"\nhelp = \"h\"\nclass = \"batch\"\n", "error": ["command \"x go\" has no usage"]},
     {"name": "a verb without the I/O flag", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[verbs.append]\ntype = \"string\"\nanswer = \"int\"\nhelp = \"a\"\n", "error": ["carries no I/O flag"]},
-    {"name": "a built-in value of another type", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[config.n]\ntype = \"int\"\nbuiltin = \"one\"\nhelp = \"n\"\n", "error": ["config.n: builtin takes int"]}
+    {"name": "a built-in value of another type", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[config.n]\ntype = \"int\"\nbuiltin = \"one\"\nhelp = \"n\"\n", "error": ["config.n: builtin takes int"]},
+    {"name": "a forbid list without the I/O flag", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[forbids]\ncalls = [\"time.Now\"]\n", "error": ["component x forbids what it replaces but carries no I/O flag"]},
+    {"name": "a forbid list of an unknown kind", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\nio = true\n[forbids]\nfiles = [\"x\"]\n", "error": ["forbids: no key files"]},
+    {"name": "a forbidden call without its package", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\nio = true\n[forbids]\ncalls = [\"Now\"]\n", "error": ["forbids.calls: \"Now\" is no call"]},
+    {"name": "a forbidden host that is no host", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\nio = true\n[forbids]\nhosts = [\"https://api.github.com\"]\n", "error": ["forbids.hosts: \"https://api.github.com\" is no host"]},
+    {"name": "a forbid list of no strings", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\nio = true\n[forbids]\ncommands = \"gh\"\n", "error": ["forbids.commands is a list of strings"]},
+    {"name": "a forbid list that names nothing", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\nio = true\n[forbids]\n", "error": ["forbids names nothing"]}
+  ],
+  "taken": [
+    {"name": "an I/O component's forbid list", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\nio = true\n[forbids]\ncalls = [\"time.Now\", \"time.sleep\"]\ncommands = [\"gh\"]\nhosts = [\"api.github.com\"]\nimports = [\"github.com/google/go-github\"]\n", "forbids": {"calls": ["time.Now", "time.sleep"], "imports": ["github.com/google/go-github"], "commands": ["gh"], "hosts": ["api.github.com"]}}
   ],
   "hash": {"text": "name = \"x\"\r\ncontract = 1\r\n", "same_as": "name = \"x\"\ncontract = 1\n"}
 }

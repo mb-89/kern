@@ -419,14 +419,18 @@ func TestSubjectTokens(t *testing.T) {
 	}
 }
 
-// Go's reader refuses what declarations.json refuses, as Python's does, and
-// hashes a declaration's bytes with CRLF read as LF.
+// Go's reader refuses what declarations.json refuses, as Python's does,
+// reads the forbid lists it takes as Python's does, and hashes a declaration's bytes with CRLF read as LF.
 func TestDeclarationsAreRefusedAlike(t *testing.T) {
 	var v struct {
 		Refused []struct {
 			Name, Text string
 			Error      []string
 		} `json:"refused"`
+		Taken []struct {
+			Name, Text string
+			Forbids    map[string][]string
+		} `json:"taken"`
 		Hash struct {
 			Text   string `json:"text"`
 			SameAs string `json:"same_as"`
@@ -443,6 +447,22 @@ func TestDeclarationsAreRefusedAlike(t *testing.T) {
 			if !strings.Contains(err.Error(), s) {
 				t.Errorf("%s: the refusal %q holds no %q", r.Name, err, s)
 			}
+		}
+	}
+	for _, k := range v.Taken {
+		c, err := index.ParseDeclaration([]byte(k.Text))
+		if err != nil {
+			t.Errorf("%s: refused: %v", k.Name, err)
+			continue
+		}
+		got := map[string][]string{}
+		for _, kind := range c.Forbids().Kinds() {
+			if len(kind.Entries) > 0 {
+				got[kind.Key] = kind.Entries
+			}
+		}
+		if !reflect.DeepEqual(got, k.Forbids) {
+			t.Errorf("%s: forbids reads %v, and wants %v", k.Name, got, k.Forbids)
 		}
 	}
 	if a, b := index.Hash([]byte(v.Hash.Text)), index.Hash([]byte(v.Hash.SameAs)); a != b || !strings.HasPrefix(a, "sha256:") {
