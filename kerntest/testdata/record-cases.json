@@ -1,0 +1,104 @@
+{
+  "about": "kerntest/record.go and python/kern/record.py held to one reading of a hot test's recordings beside an expectation file (README.md \"Hot tests\"): each case names the expectation file, the recordings file beside it, the time its age is read at, the refusal its reading names (empty where it fits) and the stale lines it says at a set age of 30 days.",
+  "cases": [
+    {
+      "name": "a recording that fits, an hour old",
+      "file": "[[expect]]\nname = \"lines.append\"\nrequest = \"post\"\nask = \"a word\"\nanswer = 1\n",
+      "recorded": {"recordings": [{"expect": 1, "name": "lines.append", "request": "post", "ask": "a word", "hot": "lines", "at": "2026-11-22T09:00:00Z", "answer": 5}]},
+      "now": "2026-11-22T10:00:00Z",
+      "refusal": "",
+      "stale": []
+    },
+    {
+      "name": "a recording that fits, a month old",
+      "file": "[[expect]]\nname = \"lines.append\"\nrequest = \"post\"\nask = \"a word\"\nanswer = 1\n",
+      "recorded": {"recordings": [{"expect": 1, "name": "lines.append", "request": "post", "ask": "a word", "hot": "lines", "at": "2026-11-22T09:00:00Z", "answer": 5}]},
+      "now": "2026-12-23T10:00:00Z",
+      "refusal": "",
+      "stale": ["stale: expect 1 (request post, ask \"a word\") of <file> is answered from hot test lines's recording of 2026-11-22T09:00:00Z, 31 days old, over 30 days: run hot test lines again"]
+    },
+    {
+      "name": "a value read that fits",
+      "file": "[[expect]]\nname = \"github.issues\"\nport = \"issues\"\ngiven = \"issue 1 is read\"\nvalue = { \"owner.repo.1\" = { number = 1, data = { title = \"a title\" } } }\n",
+      "recorded": {"recordings": [{"expect": 1, "name": "github.issues", "port": "issues", "given": "issue 1 is read", "hot": "github", "at": "2026-11-22T09:00:00Z", "value": {"owner.repo.1": {"number": 1, "data": {"title": "The first"}}}}]},
+      "now": "2026-11-22T10:00:00Z",
+      "refusal": "",
+      "stale": []
+    },
+    {
+      "name": "an answer the expectation now holds exact",
+      "file": "[[expect]]\nname = \"lines.append\"\nrequest = \"post\"\nask = \"a word\"\nanswer = 1\nexact = [\"answer\"]\n",
+      "recorded": {"recordings": [{"expect": 1, "name": "lines.append", "request": "post", "ask": "a word", "hot": "lines", "at": "2026-11-22T09:00:00Z", "answer": 5}]},
+      "now": "2026-11-22T10:00:00Z",
+      "refusal": "misfit: <recorded>: the recording of expect 1 (request post, ask \"a word\") by hot test lines no longer fits it: answer is 5, want 1: run hot test lines again",
+      "stale": []
+    },
+    {
+      "name": "a key the expectation now states",
+      "file": "[[expect]]\nname = \"github.issues\"\nport = \"issues\"\nvalue = { \"owner.repo.1\" = { number = 1, data = { title = \"a title\", state = \"open\" } } }\n",
+      "recorded": {"recordings": [{"expect": 1, "name": "github.issues", "port": "issues", "hot": "github", "at": "2026-11-22T09:00:00Z", "value": {"owner.repo.1": {"number": 1, "data": {"title": "The first"}}}}]},
+      "now": "2026-11-22T10:00:00Z",
+      "refusal": "no longer fits it: value.owner.repo.1.data.state is missing: run hot test github again",
+      "stale": []
+    },
+    {
+      "name": "another ask",
+      "file": "[[expect]]\nname = \"lines.append\"\nrequest = \"post\"\nask = \"two words\"\nanswer = 1\n",
+      "recorded": {"recordings": [{"expect": 1, "name": "lines.append", "request": "post", "ask": "a word", "hot": "lines", "at": "2026-11-22T09:00:00Z", "answer": 5}]},
+      "now": "2026-11-22T10:00:00Z",
+      "refusal": "no longer fits it: it asks \"a word\", and the expectation \"two words\"",
+      "stale": []
+    },
+    {
+      "name": "another given",
+      "file": "[[expect]]\nname = \"lines.append\"\nrequest = \"post\"\nask = \"a word\"\nanswer = 1\n",
+      "recorded": {"recordings": [{"expect": 1, "name": "lines.append", "request": "post", "given": "two lines stand", "ask": "a word", "hot": "lines", "at": "2026-11-22T09:00:00Z", "answer": 3}]},
+      "now": "2026-11-22T10:00:00Z",
+      "refusal": "no longer fits it: it is given \"two lines stand\", and the expectation \"\"",
+      "stale": []
+    },
+    {
+      "name": "a refusal recorded for an answer",
+      "file": "[[expect]]\nname = \"lines.append\"\nrequest = \"post\"\nask = \"a word\"\nanswer = 1\n",
+      "recorded": {"recordings": [{"expect": 1, "name": "lines.append", "request": "post", "ask": "a word", "hot": "lines", "at": "2026-11-22T09:00:00Z", "refused": true}]},
+      "now": "2026-11-22T10:00:00Z",
+      "refusal": "no longer fits it: it is refused where the expectation is answered, or answered where it is refused",
+      "stale": []
+    },
+    {
+      "name": "an expectation the file no longer holds",
+      "file": "[[expect]]\nname = \"lines.append\"\nrequest = \"post\"\nask = \"a word\"\nanswer = 1\n",
+      "recorded": {"recordings": [{"expect": 2, "name": "lines.append", "request": "post", "ask": "a word", "hot": "lines", "at": "2026-11-22T09:00:00Z", "answer": 5}]},
+      "now": "2026-11-22T10:00:00Z",
+      "refusal": "misfit: <recorded>: the recording of expect 2 by hot test lines is of an expectation <file> no longer holds: run hot test lines again",
+      "stale": []
+    },
+    {
+      "name": "another name",
+      "file": "[[expect]]\nname = \"lines.append\"\nrequest = \"post\"\nask = \"a word\"\nanswer = 1\n",
+      "recorded": {"recordings": [{"expect": 1, "name": "lines.insert", "request": "post", "ask": "a word", "hot": "lines", "at": "2026-11-22T09:00:00Z", "answer": 5}]},
+      "now": "2026-11-22T10:00:00Z",
+      "refusal": "no longer fits it: it is of name \"lines.insert\", and the expectation of \"lines.append\"",
+      "stale": []
+    },
+    {
+      "name": "no hot test named",
+      "file": "[[expect]]\nname = \"lines.append\"\nrequest = \"post\"\nask = \"a word\"\nanswer = 1\n",
+      "recorded": {"recordings": [{"expect": 1, "name": "lines.append", "request": "post", "ask": "a word", "at": "2026-11-22T09:00:00Z", "answer": 5}]},
+      "now": "2026-11-22T10:00:00Z",
+      "refusal": "no longer fits it: it names no hot test",
+      "stale": []
+    },
+    {
+      "name": "an expectation recorded twice",
+      "file": "[[expect]]\nname = \"lines.append\"\nrequest = \"post\"\nask = \"a word\"\nanswer = 1\n",
+      "recorded": {"recordings": [
+        {"expect": 1, "name": "lines.append", "request": "post", "ask": "a word", "hot": "lines", "at": "2026-11-22T09:00:00Z", "answer": 5},
+        {"expect": 1, "name": "lines.append", "request": "post", "ask": "a word", "hot": "lines", "at": "2026-11-22T09:00:00Z", "answer": 6}
+      ]},
+      "now": "2026-11-22T10:00:00Z",
+      "refusal": "misfit: <recorded>: expect 1 is recorded twice",
+      "stale": []
+    }
+  ]
+}

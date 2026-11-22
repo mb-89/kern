@@ -21,7 +21,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable
 
-from . import expect
+from . import expect, record
 from .component import Component
 from .fake import Fake
 
@@ -217,9 +217,10 @@ def _written(f: Fake, port: str) -> Any:
 def check(wiring: dict, *mods: Module, base: Base | None = _ENVIRONMENT) -> None:
     """The completeness check over a wiring, as ``kerntest.Check``: among the components its switched-on
     instances load, every expectation of a loaded component is claimed by exactly one loaded component and met
-    by it. Raise naming each that is unclaimed, claimed twice, unmet or pending, each in its own words; a
-    pending one names the claimer that must meet it. Each reader's file is read against base, as
-    ``read_pool``."""
+    by it, and every recording beside a loaded component's file still fits its expectation. Raise naming each that
+    is unclaimed, claimed twice, unmet or pending, and each misfit recording, each in its own words; a pending one
+    names the claimer that must meet it. Each reader's file is read against base, as ``read_pool``; a recording is
+    of the file as it stands, pending or not."""
     b = _base(base)
     loaded = {t["component"] for t in wiring.get("instances", {}).values() if t.get("enabled", True)}
     by_name: dict[str, Module] = {}
@@ -230,12 +231,17 @@ def check(wiring: dict, *mods: Module, base: Base | None = _ENVIRONMENT) -> None
             by_name[m.name] = m
     pool: Pool = {}
     claims: dict[str, list[tuple[Module, expect.Claim]]] = {}
+    errs = []
     for n in sorted(by_name):
-        x = _since(b, by_name[n].read())
+        x = by_name[n].read()
+        try:
+            record.read(x)
+        except expect.ExpectationError as err:
+            errs.append(str(err))
+        x = _since(b, x)
         _add(pool, x)
         for c in x.claims:
             claims.setdefault(c.name, []).append((by_name[n], c))
-    errs = []
     for e in sorted((e for es in pool.values() for e in es), key=lambda e: (e.file, e.n)):
         cs = claims.get(e.name, [])
         if not cs:

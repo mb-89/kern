@@ -215,3 +215,33 @@ func TestTheGitBaseIsTheReadersFileAsTheRevisionHoldsIt(t *testing.T) {
 		t.Errorf("a file the revision holds: %v, known %v, %v", x, known, err)
 	}
 }
+
+func TestAHotRunRecordsNothingOfAPendingExpectationAndFailsNot(t *testing.T) {
+	t.Parallel()
+	reader, count, _, base := newWish(t)
+	pool, err := kerntest.ReadPoolSince(base, reader.File)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hot := kerntest.Hot{Name: "TestHot", Module: count}
+	recs, err := hot.Meet(pool)
+	if err != nil {
+		t.Fatalf("a pending expectation failed the hot run: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Errorf("the hot run recorded %+v, want the two landed expectations of numbers", recs)
+	}
+	for _, r := range recs {
+		if r.Expect == 6 {
+			t.Errorf("the hot run recorded the pending expectation: %+v", r)
+		}
+	}
+	// Landed, the same expectation fails the hot run.
+	pool, err = kerntest.ReadPoolSince(landedAs(reader.File, readerExpects+fourNumbers), reader.File)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hot.Meet(pool); err == nil || !strings.Contains(err.Error(), `unmet: name "numbers": counter does not meet expect 6`) {
+		t.Errorf("a landed expectation the hot run does not meet: %v", err)
+	}
+}

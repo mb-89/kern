@@ -54,6 +54,15 @@ type Module struct {
 	// File is its expectation file; "" where it expects and claims nothing.
 	File  string
 	Given map[string]Setup
+	// Start, where set, sets each fresh fake up to reach what the module
+	// reaches, before the setup of the expectation's given: an I/O module's
+	// config set and the component started (Fake.Start), against its fake
+	// service in its tests and the real one in its hot test.
+	Start Setup
+	// Fresh, where set, makes the component each expectation is met by,
+	// one of its own each time: for a component whose state lives in it,
+	// such as an I/O module that starts once. Component is its declaration.
+	Fresh func() *index.Component
 }
 
 func (m Module) read() (Expectations, error) {
@@ -109,31 +118,62 @@ func unmet(m Module, e Expectation, err error) error {
 
 // meet runs one expectation against the claim that claims it.
 func (m Module) meet(cl Claim, e Expectation) error {
-	f, err := New(m.Component)
+	_, err := m.answer(cl, e, reach{})
+	return err
+}
+
+// answer runs one expectation against the claim that claims it, reaching
+// what r sets up, and answers what met it, as JSON reads it: the value read
+// or the answer given, after r's answer; nil where it met a refusal.
+func (m Module) answer(cl Claim, e Expectation, r reach) (any, error) {
+	c := m.Component
+	if m.Fresh != nil {
+		c = m.Fresh()
+	}
+	f, err := New(c)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	if m.Start != nil {
+		if err := m.Start(f); err != nil {
+			return nil, fmt.Errorf("starting it: %w", err)
+		}
 	}
 	if e.Given != "" {
 		setup, ok := m.Given[e.Given]
 		if !ok {
-			return fmt.Errorf("it sets up no given %q", e.Given)
+			return nil, fmt.Errorf("it sets up no given %q", e.Given)
 		}
 		if err := setup(f); err != nil {
-			return fmt.Errorf("setting up given %q: %w", e.Given, err)
+			return nil, fmt.Errorf("setting up given %q: %w", e.Given, err)
 		}
+	}
+	seen := func(v any) (any, error) {
+		g, err := generic(v)
+		if err != nil {
+			return nil, err
+		}
+		if r.answer != nil {
+			g = r.answer(g)
+		}
+		return g, nil
 	}
 	if e.Port != "" {
 		if cl.Port == "" {
-			return fmt.Errorf("it claims the name with verb %s, and the expectation is a value read", cl.Verb)
+			return nil, fmt.Errorf("it claims the name with verb %s, and the expectation is a value read", cl.Verb)
 		}
-		got, err := f.written(cl.Port)
+		v, err := f.written(cl.Port)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return Match("value", e.Value, got, e.Exact)
+		got, err := seen(v)
+		if err != nil {
+			return nil, err
+		}
+		return got, Match("value", e.Value, got, e.Exact)
 	}
 	if cl.Verb == "" {
-		return fmt.Errorf("it claims the name on output %s, and the expectation is a request", cl.Port)
+		return nil, fmt.Errorf("it claims the name on output %s, and the expectation is a request", cl.Port)
 	}
 	var verb index.VerbDecl
 	for _, v := range m.Component.Verbs() {
@@ -141,20 +181,31 @@ func (m Module) meet(cl Claim, e Expectation) error {
 			verb = v
 		}
 	}
-	ask, err := convert(e.Ask, verb.Req)
+	asked := plain(e.Ask)
+	if r.ask != nil {
+		if asked, err = generic(asked); err != nil {
+			return nil, err
+		}
+		asked = r.ask(asked)
+	}
+	ask, err := convert(asked, verb.Req)
 	if err != nil {
-		return fmt.Errorf("its verb %s cannot take the ask: %w", cl.Verb, err)
+		return nil, fmt.Errorf("its verb %s cannot take the ask: %w", cl.Verb, err)
 	}
 	ans, err := f.BeginServe(cl.Verb, ask).Wait()
 	switch {
 	case e.Refused && err == nil:
-		return fmt.Errorf("its verb %s answers %s, and the expectation is a refusal", cl.Verb, show(ans))
+		return nil, fmt.Errorf("its verb %s answers %s, and the expectation is a refusal", cl.Verb, show(ans))
 	case e.Refused:
-		return nil
+		return nil, nil
 	case err != nil:
-		return fmt.Errorf("its verb %s refuses: %w", cl.Verb, err)
+		return nil, fmt.Errorf("its verb %s refuses: %w", cl.Verb, err)
 	}
-	return Match("answer", e.Answer, ans, e.Exact)
+	got, err := seen(ans)
+	if err != nil {
+		return nil, err
+	}
+	return got, Match("answer", e.Answer, got, e.Exact)
 }
 
 // written answers what output port reads once the setup ran: a derived

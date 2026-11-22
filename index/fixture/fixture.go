@@ -5,7 +5,10 @@ package fixture
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"kern/index"
 )
@@ -121,5 +124,77 @@ var Counter = index.Declare("counter", "Counts from 1 up to upto.",
 			numbers = append(numbers, n)
 		}
 		return numbers, nil
+	}),
+)
+
+// IssueRef is what the watcher asks of an issue.
+type IssueRef struct {
+	Owner  string `json:"owner"`
+	Repo   string `json:"repo"`
+	Number int    `json:"number"`
+}
+
+// IssueData is what the watcher reads of an issue as its tracker answers it.
+type IssueData struct {
+	Title string `json:"title"`
+	State string `json:"state"`
+}
+
+// IssueRead is what the watcher relies on of an issue read: which issue,
+// when it was read, and its title and state.
+type IssueRead struct {
+	Repo   string    `json:"repo"`
+	Number int       `json:"number"`
+	Read   time.Time `json:"read"`
+	Data   IssueData `json:"data"`
+}
+
+// Issue is the watcher's request port to an issue read.
+var Issue = index.Request[IssueRef, IssueRead]("issue", "Reads an issue.")
+
+type watchIn struct {
+	Issues map[string]IssueRead `index:"issues"`
+}
+
+// Watcher reads issues of an outside tracker through names alone: the reader
+// whose expectations of the issue reads an I/O module's hot test answers
+// with real recordings (watcher.expect.toml, README.md "Hot tests").
+var Watcher = index.Declare("watcher", "Watches issues.",
+	Issue,
+	index.Derived("titles", []string{}, "Each issue read, as <number> <state>: <title>, in key order.", func(in watchIn) ([]string, error) {
+		keys := make([]string, 0, len(in.Issues))
+		for k := range in.Issues {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		titles := make([]string, 0, len(keys))
+		for _, k := range keys {
+			i := in.Issues[k]
+			titles = append(titles, fmt.Sprintf("%d %s: %s", i.Number, i.Data.State, i.Data.Title))
+		}
+		return titles, nil
+	}),
+	index.Command(index.CommandDecl{
+		Name:    "watch",
+		Usage:   "watch OWNER REPO NUMBER",
+		Summary: "Read one issue.",
+		Help:    "Reads the issue and says its title and its state.",
+		Group:   "Fixtures",
+		Class:   index.Batch,
+	}, func(_ struct{}, args []string) (index.Result, error) {
+		if len(args) != 3 {
+			return index.Result{}, fmt.Errorf("watch takes an owner, a repository and a number")
+		}
+		n, err := strconv.Atoi(args[2])
+		if err != nil {
+			return index.Result{}, fmt.Errorf("watch: %q is no number", args[2])
+		}
+		return index.Result{
+			Requests: []index.Ask{Issue.Ask(IssueRef{Owner: args[0], Repo: args[1], Number: n})},
+			Then: func(answers []any) (index.Result, error) {
+				i := Issue.Answer(answers[0])
+				return index.Result{Text: fmt.Sprintf("%s issue %d %s: %s", i.Repo, i.Number, i.Data.State, i.Data.Title)}, nil
+			},
+		}, nil
 	}),
 )

@@ -11,8 +11,10 @@ import (
 
 // Check is the completeness check over a wiring: among the components the
 // wiring loads (its switched-on instances), every expectation of a loaded
-// component is claimed by exactly one loaded component, and met by it. It
-// answers each expectation that is unclaimed, claimed twice or unmet, each
+// component is claimed by exactly one loaded component, and met by it, and
+// every recording beside a loaded component's file still fits its
+// expectation (ReadRecordings). It answers each expectation that is
+// unclaimed, claimed twice or unmet, and each misfit recording, each
 // with its own message naming the name, the expectation and the reader's
 // file. Two components that claim one name pass where no wiring loads both.
 // mods are the components the check may find loaded; one the wiring does not
@@ -50,11 +52,17 @@ func CheckSince(base Base, w index.Wiring, mods ...Module) error {
 	}
 	pool := Pool{}
 	claims := map[string][]claimer{}
+	var misfit []error
 	for _, n := range sortedKeys(byName) {
 		m := byName[n]
 		x, err := m.read()
 		if err != nil {
 			return err
+		}
+		// A recording is of the reader's file as it stands, pending or not:
+		// a misfit refuses either way.
+		if _, err := ReadRecordings(x); err != nil {
+			misfit = append(misfit, err)
 		}
 		if x, err = since(base, x); err != nil {
 			return err
@@ -74,7 +82,7 @@ func CheckSince(base Base, w index.Wiring, mods ...Module) error {
 		}
 		return all[i].N < all[j].N
 	})
-	var errs []error
+	errs := misfit
 	for _, e := range all {
 		cs := claims[e.Name]
 		switch len(cs) {
