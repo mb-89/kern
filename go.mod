@@ -12,6 +12,7 @@ require (
 
 require (
 	github.com/antithesishq/antithesis-sdk-go v0.4.3-default-no-op // indirect
+	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/google/go-tpm v0.9.5 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
