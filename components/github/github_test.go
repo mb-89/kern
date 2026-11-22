@@ -3,6 +3,7 @@ package github_test
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -102,6 +103,8 @@ type fakeGitHub struct {
 	refuseAt map[string][]func(http.ResponseWriter) // refusals queued before one path's answer
 	asked    []string                               // each request: its path, and its If-None-Match where it sent one
 	answered []int
+	created  map[string]string // the answer to a POST, by its path
+	posted   []string          // each POST: its path and its JSON body
 }
 
 func newFake(t *testing.T) (*fakeGitHub, *httptest.Server) {
@@ -109,7 +112,7 @@ func newFake(t *testing.T) (*fakeGitHub, *httptest.Server) {
 		"/repos/alice/demo/issues/7":                  `{"number": 7, "title": "One issue", "state": "open"}`,
 		"/repos/alice/demo/pulls/8":                   `{"number": 8, "title": "One pull", "head": {"sha": "abc123"}}`,
 		"/repos/alice/demo/commits/abc123/check-runs": `{"total_count": 2, "check_runs": [{"name": "check"}, {"name": "kern-windows"}]}`,
-	}, links: map[string]string{}, refuseAt: map[string][]func(http.ResponseWriter){}}
+	}, links: map[string]string{}, refuseAt: map[string][]func(http.ResponseWriter){}, created: map[string]string{}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -133,6 +136,20 @@ func newFake(t *testing.T) (*fakeGitHub, *httptest.Server) {
 			q[0](w)
 			f.refuseAt[path] = q[1:]
 			f.answered = append(f.answered, -1)
+			return
+		}
+		if r.Method == http.MethodPost {
+			data, _ := io.ReadAll(r.Body)
+			f.posted = append(f.posted, path+" "+string(data))
+			answer, ok := f.created[path]
+			if !ok {
+				w.WriteHeader(http.StatusNotFound)
+				f.answered = append(f.answered, http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, answer)
+			f.answered = append(f.answered, http.StatusCreated)
 			return
 		}
 		body, ok := f.bodies[strings.ToLower(path)] // GitHub reads names regardless of case

@@ -160,11 +160,13 @@ type GitHub struct {
 	last     map[string]any    // the newest Snapshot or List of each read, by outbox key
 	stepWait time.Duration
 	tellWait time.Duration
-	answered map[string]bool         // the PostToolUse payloads that answered a step, until their tell
-	steps    map[string]*waitingStep // the steps of the verb step waiting for a tool answer, by outbox key
-	done     []answeredStep          // the numbered steps answered last, oldest first, up to keepAnswered
-	stale    map[string]string       // the PostToolUse payloads that answered an answered step, with their refusal, until their tell
-	asked    chan struct{}           // signalled each time a step is asked, which a tell waits for
+	// templates is the folder the write verbs read their templates from.
+	templates string
+	answered  map[string]bool         // the PostToolUse payloads that answered a step, until their tell
+	steps     map[string]*waitingStep // the steps of the verb step waiting for a tool answer, by outbox key
+	done      []answeredStep          // the numbered steps answered last, oldest first, up to keepAnswered
+	stale     map[string]string       // the PostToolUse payloads that answered an answered step, with their refusal, until their tell
+	asked     chan struct{}           // signalled each time a step is asked, which a tell waits for
 }
 
 // The component's outputs.
@@ -228,6 +230,7 @@ func New(o Options) *GitHub {
 		index.Config("pace-max", "60s", "The longest rate-limit wait the token backend sits out; a longer one fails the read."),
 		index.Config("step-wait", "60m", "The longest a step of the verb step waits for the session's tool answer; a step asks its own wait up to it."),
 		index.Config("tell-wait", "300ms", "How long the hook of a tool answer that answered a step waits for the next step to be asked, so it tells that one."),
+		index.Config("templates", ".se/templates", "The folder the write verbs read each template from, <name>.json, as the application generates it; relative to the checkout."),
 		issuesOut, pullsOut, checksOut, commentsOut, issueListsOut, pullListsOut, outboxOut, backendOut,
 		index.Inlet(g.start),
 		index.Hears(g.hear),
@@ -236,6 +239,7 @@ func New(o Options) *GitHub {
 			return g.step(ctx, a)
 		}),
 	}
+	parts = append(parts, g.writeParts()...)
 	for _, k := range kinds {
 		k := k
 		parts = append(parts, index.Verb(k.verb, "Reads "+k.help+": answers its snapshot and writes it to "+k.port+".", func(_ context.Context, r Ref) (Snapshot, error) {
@@ -334,6 +338,7 @@ func (g *GitHub) start(instance string, read index.Reader, commit index.Commit) 
 	}
 	g.instance, g.commit, g.backend, g.fresh, g.wait = instance, commit, backend, refresh, wait
 	g.stepWait, g.tellWait = stepWait, tellWait
+	g.templates = str("templates")
 	if backend == Token {
 		g.rest = &rest{api: strings.TrimSuffix(str("api"), "/"), token: token, client: g.o.Client, sleep: g.o.Sleep, now: g.o.Now, paceMax: paceMax, cache: map[string]cached{}}
 	}

@@ -151,10 +151,15 @@ launcher, since its working directory need not be the checkout.
   and delivers each request it answers to the I/O verb the wiring binds its port to (`index`
   `Call`), so a write through the door passes the wire's type check and the verb's own, and
   leaves the record any call leaves. The door reaches no outside service itself.
-  - The [GitHub component](components/github/README.md)'s `issue-create` and `issue-comment` are
-    the verbs a command files an issue or a comment through.
-  - `components/github/door_test.go` files an issue through the door against its fake REST
-    server.
+  - An I/O component's own writing command asks its own verb the same way: a request port that
+    names a verb of its component (`index.RequestPort.Self`) is bound to it where the wiring binds
+    the port to nothing.
+  - The [GitHub component](components/github/README.md) serves `github_write`: its commands
+    `github issue-create` and `github issue-comment`, through its verbs of those names. They take a
+    filled template, never free text, and check it against the template before anything reaches
+    GitHub ([its README](components/github/README.md#writes-filled-templates-only)).
+  - `components/github/door_test.go` files an issue through the door and the real core against
+    the component's fake REST server.
 - **The catalog check.** `mcp.Tools` refuses a read-only or writing command without its `mcp`
   line, when an agent uses it (`index.CommandDecl.MCP`; both declaration readers read every key),
   a writing command whose instance has no request port to write through, an instance whose tool
