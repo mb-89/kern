@@ -202,9 +202,9 @@ func serveArgs(home string, grace, idle time.Duration) []string {
 }
 
 // runHook posts the host's hook JSON, read from stdin, on hook.<event> and
-// prints the answer as the host's hook JSON: the output of the command bound
-// to the event, else the context the components told, on an event that
-// carries context (HookOutput). A pass with nothing told prints nothing; so
+// prints the answer as the host's hook JSON: a guard's deny (DenyOutput),
+// the output of the command bound to the event, else the context the
+// components told, on an event that carries context (HookOutput). A pass with nothing told prints nothing; so
 // does every failure, which goes to stderr alone, with the exit code
 // --unanswered names, 0 by default.
 func runHook(c *Call) int {
@@ -248,6 +248,10 @@ func runHook(c *Call) int {
 				return 0
 			}
 		}
+	case a.Effect == host.Deny:
+		stdout.Write(append(DenyOutput(event, payload, a.Reason), '\n'))
+		fmt.Fprintln(stderr, a.Reason)
+		return DenyExit
 	case a.Effect == host.Output:
 		if a.Output != "" {
 			fmt.Fprintln(stdout, strings.TrimRight(a.Output, "\n"))
@@ -277,6 +281,29 @@ var DiedEvents = map[string]bool{"PostToolUse": true, "UserPromptSubmit": true}
 // and where its log holds the rest.
 func DiedReport(root, said string) string {
 	return fmt.Sprintf("the core ended at its start; it said:\n%s\n(%s holds all it said)", said, host.LogPath(root))
+}
+
+// DenyExit is the exit code of a hook the core denies. Every host reads exit
+// code 2 of a PreToolUse hook as a refusal of the tool call: Claude Code then
+// takes the JSON's reason, the Copilot CLI denies on it whatever JSON it reads,
+// and VS Code hands the model the standard error, which holds the reason.
+const DenyExit = 2
+
+// DenyOutput is the host's hook JSON that denies the tool call of payload with
+// reason, in the shape the payload's own field names say its host reads.
+//   - Claude Code, VS Code and the Copilot CLI's VS Code compatible format
+//     (a PascalCase event, snake_case fields such as tool_name) read
+//     hookSpecificOutput's permissionDecision and permissionDecisionReason.
+//   - The Copilot CLI's camelCase format (fields such as toolName) reads both
+//     at the top level.
+func DenyOutput(event string, payload []byte, reason string) []byte {
+	if host.ParseToolCall(payload).Camel {
+		out, _ := json.Marshal(map[string]string{"permissionDecision": "deny", "permissionDecisionReason": reason})
+		return out
+	}
+	out, _ := json.Marshal(map[string]any{"hookSpecificOutput": map[string]string{
+		"hookEventName": event, "permissionDecision": "deny", "permissionDecisionReason": reason}})
+	return out
 }
 
 // HookOutput is the host's hook JSON for the core's answer to event: the

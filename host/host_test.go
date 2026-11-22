@@ -748,6 +748,31 @@ func TestABoundHookIsAnsweredByItsCommand(t *testing.T) {
 	}
 }
 
+// A guard's refusal denies the event with its reason, before the command
+// bound to it runs; an event the guard lets pass reaches the command.
+func TestAGuardDeniesAHookBeforeItsCommand(t *testing.T) {
+	t.Parallel()
+	guard := index.Declare("guard", "Refuses a write.", index.IO(),
+		index.Guards(func(_, event string, payload []byte) string {
+			if event == host.PreToolUse && host.ParseToolCall(payload).Tool == "Write" {
+				return "write it through the tool files_write"
+			}
+			return ""
+		}))
+	w := checked(index.Hook{Event: host.PreToolUse, Command: "checker check", Line: 3})
+	w.Instances = append(w.Instances, index.Instance{Name: "guard", Component: "guard", Enabled: true, Config: map[string]index.ConfigValue{}, Line: 2})
+	c := served(t, host.Options{Wiring: w, Components: []*index.Component{checker, guard}})
+	s, _ := c.Standing()
+	a, err := host.Post(host.Wall{}, s.Root, host.PreToolUse, []byte(`{"session_id":"s1","tool_name":"Write","tool_input":{"file_path":"docs/a.md"}}`), wait)
+	if err != nil || a.Effect != host.Deny || a.Reason != "write it through the tool files_write" || a.Output != "" {
+		t.Fatalf("a refused PreToolUse answers %+v, %v, and wants deny with the guard's reason", a, err)
+	}
+	a, err = host.Post(host.Wall{}, s.Root, host.PreToolUse, []byte(`{"session_id":"s1","tool_name":"Read"}`), wait)
+	if err != nil || a.Effect != host.Output || !strings.Contains(a.Output, `"tool_name":"Read"`) {
+		t.Fatalf("a PreToolUse the guard lets pass answers %+v, %v, and wants the bound command's output", a, err)
+	}
+}
+
 // A hook bound to a declared instance whose process has not attached passes
 // with the reason, without waiting for the attach.
 func TestAHookBoundToAnUnattachedInstancePassesAtOnce(t *testing.T) {

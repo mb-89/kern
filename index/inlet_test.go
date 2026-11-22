@@ -67,3 +67,56 @@ config = { prefix = "seen " }
 		t.Fatalf("on/last reads %v and off heard %q", v.V, heard["off"])
 	}
 }
+
+// The first switched-on instance whose guard refuses a host's event answers
+// its reason; one that lets it pass, and a switched-off one, answer nothing.
+func TestTheFirstGuardThatRefusesAnswersItsReason(t *testing.T) {
+	t.Parallel()
+	asked := map[string]int{}
+	guard := index.Declare("guard", "Refuses the events its config names.",
+		index.IO(), index.Config("refuses", "", "The event it refuses."),
+		index.Guards(func(instance, event string, _ []byte) string {
+			asked[instance]++
+			if instance == "first" || event != "PreToolUse" {
+				return ""
+			}
+			return instance + " refuses " + event
+		}),
+	)
+	w, err := index.ParseWiring([]byte(`
+[instances.first]
+component = "guard"
+
+[instances.second]
+component = "guard"
+
+[instances.third]
+component = "guard"
+
+[instances.off]
+component = "guard"
+enabled = false
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ix, err := index.Start(w, guard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ix.Guard("PreToolUse", []byte(`{}`)); got != "second refuses PreToolUse" {
+		t.Fatalf("the guards answer %q, and want the first refusal's reason", got)
+	}
+	if asked["third"] != 0 || asked["off"] != 0 {
+		t.Fatalf("guards asked after the first refusal, or switched off: %v", asked)
+	}
+	if got := ix.Guard("PostToolUse", []byte(`{}`)); got != "" {
+		t.Fatalf("an event every guard lets pass answers %q", got)
+	}
+	if got := guard.Guard("second", "PreToolUse", nil); got != "second refuses PreToolUse" {
+		t.Fatalf("a fake's ask of the component's guard answers %q", got)
+	}
+	if c := index.Declare("bare", "Guards without the flag.", index.Guards(func(string, string, []byte) string { return "" })); c.Err() == nil {
+		t.Fatal("a guard without the I/O flag is declared, and wants refused")
+	}
+}
