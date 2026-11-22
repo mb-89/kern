@@ -48,6 +48,13 @@ func (c *clock) After(d time.Duration) <-chan time.Time {
 	return ch
 }
 
+// pending answers how many waits on the clock have not ended.
+func (c *clock) pending() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.waits)
+}
+
 func (c *clock) move(d time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -533,6 +540,41 @@ func TestARelayReadWaitsForTheToolAnswer(t *testing.T) {
 	r, err := ix.Call("read", "checks", "alice", "demo", "8")
 	if err != nil || r.Text != "2 check runs, read 2026-11-13T09:00:00Z via relay" {
 		t.Fatalf("the waiting read answers %q, %v", r.Text, err)
+	}
+}
+
+// relay-wait measures against the component's clock: a read that no answer
+// reaches fails once the clock moves past its wait, naming the step, and not
+// before; the case moves the clock and never waits the 10s out.
+func TestARelayReadFailsWhenItsClockPassesItsWait(t *testing.T) {
+	t.Parallel()
+	clk := &clock{now: nine}
+	_, ix := started(t, github.Options{Clock: clk, Token: noToken}, wiring(t, `relay-wait = "10s"`))
+	failed := make(chan error, 1)
+	go func() {
+		_, err := ix.Call("read", "issue", "alice", "demo", "7")
+		failed <- err
+	}()
+	for clk.pending() == 0 {
+		time.Sleep(time.Millisecond) // the read asks its step and waits at once
+	}
+	if v, _ := ix.Read("github/outbox/issue.alice.demo.7"); !v.Provided {
+		t.Fatal("the waiting read stands in no outbox step")
+	}
+	clk.move(9 * time.Second)
+	select {
+	case err := <-failed:
+		t.Fatalf("the read failed at 9s of a 10s wait: %v", err)
+	default:
+	}
+	clk.move(time.Second)
+	select {
+	case err := <-failed:
+		if err == nil || !strings.Contains(err.Error(), "outbox step issue.alice.demo.7") {
+			t.Fatalf("the read past its wait answers %v, and wants it failed naming its outbox step", err)
+		}
+	case <-time.After(10 * time.Second): // bounds a failure that comes at once
+		t.Fatal("the read did not fail once its clock passed its wait")
 	}
 }
 

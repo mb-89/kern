@@ -82,7 +82,7 @@ component = "kept"
 func TestAKilledCallersCallIsGivenUp(t *testing.T) {
 	t.Parallel()
 	w, comps, held, gone, release := keptWiring(t)
-	c := served(t, host.Options{Clock: newClock(), Wiring: w, Components: comps, CallBeat: 50 * time.Millisecond})
+	c := served(t, host.Options{Clock: beating{newClock()}, Wiring: w, Components: comps, CallBeat: 50 * time.Millisecond})
 	s, err := c.Standing()
 	if err != nil {
 		t.Fatal(err)

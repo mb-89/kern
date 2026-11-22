@@ -298,7 +298,7 @@ func (c *Core) answer() error {
 			c.reply(m, map[string]any{"pid": c.pid})
 			// The asker hangs up once it has the answer; one that stays on delays the stop by HangUp at most.
 			if m.Reply != "" {
-				c.bus.Unheard(m.Reply, c.o.HangUp)
+				c.bus.Unheard(m.Reply, c.o.HangUp, c.o.Clock.Now)
 			}
 			c.Stop("asked to stop")
 		}},

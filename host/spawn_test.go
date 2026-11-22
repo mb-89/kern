@@ -35,7 +35,7 @@ func TestAStopOfACoreItsLiveStarterSpawnedReturnsAtOnce(t *testing.T) {
 	}
 	t.Parallel()
 	root := t.TempDir()
-	t.Cleanup(func() { _, _ = host.AskStop(root) })
+	t.Cleanup(func() { _, _ = host.AskStop(host.Wall{}, root) })
 	got, err := host.Start(host.Wall{}, root, os.Args[0], spawnedArg)
 	if err != nil || got != host.Spawned {
 		t.Fatalf("the start answers %v, %v, and wants %v", got, err, host.Spawned)
@@ -49,7 +49,7 @@ func TestAStopOfACoreItsLiveStarterSpawnedReturnsAtOnce(t *testing.T) {
 		}
 	}
 	asked := time.Now()
-	pid, err := host.AskStop(root)
+	pid, err := host.AskStop(host.Wall{}, root)
 	if err != nil {
 		t.Fatalf("the stop of the spawned core: %v", err)
 	}

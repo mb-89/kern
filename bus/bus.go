@@ -240,18 +240,19 @@ func (b *Bus) Names() []string {
 	return out
 }
 
-// Unheard waits until no open connection hears subject, or within is out, and
-// answers whether none does. The core waits on it before its bus goes, so that
-// the asker of its stop takes the answer and hangs up first: once the server
-// closes a connection, its client drops what it has not yet handed on.
-func (b *Bus) Unheard(subject string, within time.Duration) bool {
-	end := time.Now().Add(within)
+// Unheard waits until no open connection hears subject, or within is out on
+// the clock now reads, and answers whether none does. The core waits on it
+// before its bus goes, so that the asker of its stop takes the answer and
+// hangs up first: once the server closes a connection, its client drops what
+// it has not yet handed on.
+func (b *Bus) Unheard(subject string, within time.Duration, now func() time.Time) bool {
+	end := now().Add(within)
 	for {
 		z, err := b.server.Connz(&server.ConnzOptions{Account: server.DEFAULT_GLOBAL_ACCOUNT, FilterSubject: subject})
 		if err == nil && z.NumConns == 0 {
 			return true
 		}
-		if !time.Now().Before(end) {
+		if !now().Before(end) {
 			return false
 		}
 		time.Sleep(unheardLook)

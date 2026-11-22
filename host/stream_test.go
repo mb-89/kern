@@ -59,7 +59,7 @@ component = "runner"
 func TestAStreamingCallHearsItsLinesAndBeatsBeforeItsAnswer(t *testing.T) {
 	t.Parallel()
 	w, comps, release := slowWiring(t)
-	c := served(t, host.Options{Clock: newClock(), Wiring: w, Components: comps, CallBeat: 10 * time.Millisecond})
+	c := served(t, host.Options{Clock: beating{newClock()}, Wiring: w, Components: comps, CallBeat: 10 * time.Millisecond})
 	client := as(t, c, bus.Client)
 	inbox := bus.Inbox(bus.Client) + ".case"
 	progress, reply := inbox+".progress", inbox+".reply"
