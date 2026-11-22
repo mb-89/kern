@@ -92,8 +92,11 @@ type Bus struct {
 // the bus refuses an answer sent later (a test's way to see a refused answer,
 // cli.ReplyWaitEnv). NATS's own default, two minutes, would refuse the answer
 // of every step that runs longer, however it beats, and the core would wait
-// out its step wait in silence.
-func Start(instances []Instance, replyWait time.Duration) (*Bus, error) {
+// out its step wait in silence. serverDefault is that default, the expiry a
+// reply permission that names none takes: zero or less, NATS's two minutes;
+// more, a test's way to shorten the limit the long step guards against
+// (cli.ReplyDefaultEnv), since NATS's own is a constant.
+func Start(instances []Instance, replyWait, serverDefault time.Duration) (*Bus, error) {
 	users := map[string]string{}
 	var accounts []*server.User
 	add := func(name string, perms *server.Permissions) error {
@@ -115,7 +118,7 @@ func Start(instances []Instance, replyWait time.Duration) (*Bus, error) {
 		return nil, err
 	}
 	for _, in := range instances {
-		if err := add(in.Name, instancePermissions(in, replyWait)); err != nil {
+		if err := add(in.Name, instancePermissions(in, replyWait, serverDefault)); err != nil {
 			return nil, err
 		}
 	}
@@ -159,8 +162,10 @@ func password() (string, error) {
 // command; it hears its own runs,
 // commands and, for an I/O instance, requests, every value, and its own inbox.
 // It answers each request the core sends it once, within replyWait where that
-// is positive, and with no time limit otherwise (Start).
-func instancePermissions(in Instance, replyWait time.Duration) *server.Permissions {
+// is positive, and with no time limit otherwise (Start). The bus gives the
+// server's default, serverDefault, to a reply permission that names no
+// expiry itself, as the server would, so a test can shorten it.
+func instancePermissions(in Instance, replyWait, serverDefault time.Duration) *server.Permissions {
 	i := Subject(in.Name)
 	sub := []string{Run + i, Cmd + i + ".>", Val + ">", Inbox(in.Name) + ".>"}
 	if in.IO {
@@ -170,8 +175,21 @@ func instancePermissions(in Instance, replyWait time.Duration) *server.Permissio
 		Publish:   &server.SubjectPermission{Allow: []string{Commit + i, Lease + i, In + i, Say + i + ".>", Get + ">", Call + ">"}},
 		Subscribe: &server.SubjectPermission{Allow: sub},
 		// An instance answers the core's cmd and io requests on the reply subject each names.
-		Response: &server.ResponsePermission{MaxMsgs: 1, Expires: replyExpires(replyWait)},
+		Response: &server.ResponsePermission{MaxMsgs: 1, Expires: orDefault(replyExpires(replyWait), serverDefault)},
 	}
+}
+
+// orDefault is the expiry the server applies to a reply permission whose
+// expiry is expires: zero takes serverDefault, NATS's two minutes where that
+// is zero or less.
+func orDefault(expires, serverDefault time.Duration) time.Duration {
+	if expires != 0 {
+		return expires
+	}
+	if serverDefault <= 0 {
+		return server.DEFAULT_ALLOW_RESPONSE_EXPIRATION
+	}
+	return serverDefault
 }
 
 // replyExpires is the server's expiry of a reply permission for replyWait: a

@@ -80,6 +80,10 @@ type Options struct {
 	// take to answer one step or request (bus.Start); unset, the core's own
 	// waits bound it alone.
 	ReplyWait time.Duration
+	// ReplyDefault, where set, replaces NATS's own expiry of a reply
+	// permission that names none, two minutes (bus.Start): a test's way to
+	// shorten the limit a long step guards against.
+	ReplyDefault time.Duration
 	// Log takes what the core and its placed processes say; none where nil.
 	Log io.Writer
 }
@@ -216,7 +220,7 @@ func Serve(o Options) (*Core, error) {
 			c.types[in.Name][out.Port.Port] = out.Type
 		}
 	}
-	if c.bus, err = bus.Start(instances, o.ReplyWait); err != nil {
+	if c.bus, err = bus.Start(instances, o.ReplyWait, o.ReplyDefault); err != nil {
 		return nil, fmt.Errorf("kern serve: %w", err)
 	}
 	if c.nc, err = bus.Dial(c.bus.URL(), bus.Core, c.bus.Users()[bus.Core]); err != nil {
