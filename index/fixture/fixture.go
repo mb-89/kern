@@ -106,3 +106,20 @@ var Clerk = index.Declare("clerk", "Files words in a ledger.",
 		}, nil
 	}),
 )
+
+type countIn struct {
+	Upto int `index:"config/upto"`
+}
+
+// Counter writes the numbers 1 to its config upto: the writer that claims
+// and meets what tally expects of the numbers it reads (counter.expect.toml).
+var Counter = index.Declare("counter", "Counts from 1 up to upto.",
+	index.Config("upto", 0, "The last number counted."),
+	index.Derived("numbers", []int{}, "The numbers 1 to upto.", func(in countIn) ([]int, error) {
+		numbers := []int{}
+		for n := 1; n <= in.Upto; n++ {
+			numbers = append(numbers, n)
+		}
+		return numbers, nil
+	}),
+)

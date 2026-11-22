@@ -1,0 +1,5 @@
+# The name counter writes on its output numbers: its tests meet every expectation pooled under it
+# (README.md "Expectations"), tally's among them.
+[[claim]]
+name = "numbers"
+port = "numbers"

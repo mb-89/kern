@@ -1,7 +1,8 @@
 """kern's Python SDK: a component in Python, its fake core and its process on the bus.
 
 Standard library only. ``component`` makes a component from the ``component.toml``
-beside its code; :mod:`kern.fake` tests it without the core; ``python -m kern run
+beside its code; :mod:`kern.fake` tests it without the core, answered from its expectations
+(:mod:`kern.expect`), and :mod:`kern.pool` meets the pooled ones it claims; ``python -m kern run
 <folder>`` is its process (:mod:`kern.runner`), over the NATS peer of :mod:`kern.nats`.
 SE's docs/go-core.md ("The component contract") is the contract until kern owns it.
 """

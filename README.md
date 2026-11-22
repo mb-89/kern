@@ -13,8 +13,8 @@ named in the design's plan.
 |---|---|---|
 | `go.mod` | the module and its pinned Go version, which CI reads | |
 | `index/` | names, families, the store, snapshots, a single writer per name, built-in values, the catalog check at start, waves, actions, the collector, and `wiring.toml` read at start | `src/index` at `ff01204` |
-| `index/fixture/` | the fixture components the index and the fake core are tested with | `src/index/fixture` |
-| `kerntest/` | the Go fake core: seed by local name, run, assert writes and requests, answer each request, give a call up as the core does (`Begin`, `BeginServe`, `Abandon`, `Gone`) | `src/index/indextest` |
+| `index/fixture/` | the fixture components the index and the fake core are tested with, and their expectation files ([Expectations](#expectations)) | `src/index/fixture` |
+| `kerntest/` | the Go fake core: seed by local name, run, assert writes and requests, answer each request, give a call up as the core does (`Begin`, `BeginServe`, `Abandon`, `Gone`); answer a component from its expectations, meet the pooled ones it claims, and check a wiring's completeness ([Expectations](#expectations)) | `src/index/indextest` |
 | `bus/` | the embedded NATS server on loopback, a user and permissions per component instance, so the bus refuses a second writer | quackitect v5 `src/index/bus.go` |
 | `host/` | the core's process: the standing file, the detached start and its claim file, leases, placements, the idle end | v5 `src/index/detach*.go`, `start.go`, `door.go` |
 | `git/` | kern's git door: every git command kern and SE's Go components run, real git outside tests and the fake (`git/gitfake/`) in them, both held to one contract (`git/contract_test.go`); a test that chose no backend is refused real git, and `SE_GIT_DOOR` picks a process's backend, its `fake:<state file>` read from the state SE's Python fake writes (`git/gitfake/state.go`) | SE's `scripts/git_door.py` |
@@ -25,7 +25,7 @@ named in the design's plan.
 | `components/session/` | the session record, off by default: one JSON line per host event, a file per session under `.se/.runtime/sessions/` ([its README](components/session/README.md)) | |
 | `contract/` | the contract suite: the built binary held to the bus's and the host's promises, and `cases.json` held against the Go fake, the Python fake and the real core with a Python component attached | |
 | `contract/fixture/` | tally, the suite's fixture and the sample Python component (`component.toml`, `__init__.py`), and the declarations of the two peers the real leg plays | |
-| `python/kern/` | the Python SDK, standard library only: the NATS peer, `component.toml`'s reader, the component and its decorators, the fake core, the runner `python -m kern run <folder>` | |
+| `python/kern/` | the Python SDK, standard library only: the NATS peer, `component.toml`'s reader, the component and its decorators, the fake core, expectations and their pool (`expect.py`, `pool.py`), the runner `python -m kern run <folder>` | |
 | `python/tests/` | the Python fake's leg of the contract suite and the sample component's test, run by `se.toml` `[tests.beside.python]` | |
 | `release.toml` | kern's version and the one URL its release is published under ([Release](#release)) | |
 | `tools/release/` | builds the release: six archives and `SHA256SUMS` | |
@@ -237,6 +237,74 @@ shortens that expiry to 150 ms and the phase works 0.3 s, so the answer the bus 
 is refused again with the fix reverted. Its fast guards, in milliseconds: `bus/expiry_test.go` holds
 that an instance's reply permission never expires where the core sets no reply wait, and
 `host/refused_test.go` that a step whose answer the bus refused fails at once.
+
+## Expectations
+
+A component's tests never fake the component on the other side of a name. Each component keeps
+beside its tests one expectation file, stating what its tests rely on of each name it reads and
+each request it sends, and the names and requests it claims. The expectations pool by name, never
+by component, and the components one wiring loads claim and meet them. This is the person's
+decision of 22 Nov, after Pact's consumer expectations and provider states, without Pact's
+contracts between named pairs.
+
+```toml
+[[expect]]                   # a value it reads
+name = "numbers"             # the name it pools under
+port = "numbers"             # its own input port, which the fake seeds
+given = "numbers stand"      # optional: the precondition its claimer sets up
+value = [1, 2, 3]            # the least it relies on
+
+[[expect]]                   # a request it sends
+name = "lines.append"
+request = "post"             # its own request port, which the fake answers
+ask = ""                     # what it sends
+refused = true               # what it relies on: refused, or answer = <value>
+exact = ["ask"]              # the paths matched by equality; match = "exact" is all of them
+
+[[claim]]                    # a name it writes, on its output port
+name = "numbers"
+port = "numbers"
+
+[[claim]]                    # a request it answers, with its verb
+name = "lines.append"
+verb = "append"
+```
+
+- **Its name** is lowercase words joined by dots, such as `github.issues`. It is the only thing a
+  reader and its claimer share. A file is `expect.toml` in a component's folder, or
+  `<component>.expect.toml` where a folder holds several components.
+- **Matched by type.** A value or an answer meets its expectation where it holds the same kinds: a
+  whole number for an integer, any number for a float, a string, a bool, a list with at least one
+  item where the expectation's has one (each item like one of the expectation's), and a table with
+  at least the expectation's keys. The paths `exact` names (`value.number`, `answer`,
+  `value.labels[]` for each item) are matched by equality, so an expectation states only what
+  would break its reader if it changed.
+- **Declare: the reader's test.** `kerntest.Expecting(c, file)` and `kern.fake.expecting(c, file)`
+  answer a component's tests from its own file. Each input port reads its expectation's value, and
+  each request gets the answer or the refusal of the first expectation whose ask it matches. An
+  expectation that holds its ask exact goes first, then one matched by type. Within each, one of
+  the givens `Given` names goes before one with none. Such a fake refuses `Seed` and `Answer`, and
+  a request no expectation answers fails the test.
+- **Claim: the writer's test.** `kerntest.ReadPool(files...)` pools the readers' files by name, and
+  `kerntest.Module{Component, File, Given}.Meet(pool)` holds the component to every expectation
+  pooled under the names it claims, each in a fake of its own. It runs the setup its test gives for
+  that expectation's given, then reads the claimed output (derived where it is a derivation) or
+  serves the ask on the claimed verb. `kern.pool.Module(...).meet(pool)` is the same in Python.
+- **The completeness check**, `kerntest.Check(wiring, modules...)` and `kern.pool.check`, runs over
+  the components a wiring's switched-on instances load. Every expectation of a loaded component is
+  claimed by exactly one loaded component and met by it, else it fails with `unclaimed`, `claimed
+  twice` or `unmet`, naming the name, the expectation and the reader's file. Two components that
+  claim one name, two doors to two trackers, both pass where no wiring loads both. The check runs
+  the claimers' own setups and never answers for a component itself. A component declared by its
+  `component.toml` alone takes part as a reader. As a claimer it is met by its own language's
+  tests, so a Go check cannot run it.
+- **The worked example**, `index/fixture/expect_test.go`. tally (`tally.expect.toml`) and the clerk
+  (`clerk.expect.toml`) are answered from their files. counter claims `numbers` and the ledger
+  claims `lines.append`, and each meets the pool of the Go fixtures and of the sample Python
+  component (`contract/fixture/tally/expect.toml`, tested in `python/tests/test_kern_sample.py`).
+  A wiring that loads them is complete, and one without counter leaves `numbers` unclaimed.
+  `kerntest/testdata/expect-cases.json` holds the Go and Python readers to the same refusals and
+  matches.
 
 ## Release
 

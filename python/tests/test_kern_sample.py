@@ -47,3 +47,25 @@ def test_a_python_component_declares_reads_commits_and_answers_a_command() -> No
     assert fake.run("tally file", "a", "b") == "filing 2 words\nfiled b as line 2"
     assert fake.requests == [Ask("post", "a"), Ask("post", "b")]
     assert fake.out("note").value == "b as line 2"
+
+
+def test_the_sample_component_is_answered_from_its_own_expectations() -> None:
+    # tally's expect.toml beside its component.toml states what it reads and what its posts are answered;
+    # kern's Go fixtures counter and ledger claim and meet them (index/fixture/expect_test.go).
+    from kern.component import KernError
+    from kern.fake import expecting
+
+    fake = expecting(runner.load(TALLY), TALLY / "expect.toml")
+    fake.derive("total")
+    assert fake.out("total").value == 0
+    fake.given("numbers stand")
+    fake.config(scale=10)
+    fake.derive("total")
+    assert fake.out("total").value == 60
+    assert fake.run("tally file", "a", "b") == "filing 2 words\nfiled b as line 1"
+    try:
+        fake.run("tally file", "a", "")
+    except KernError as e:
+        assert "request 2 of 2, on post, failed: refused, as expect 4" in str(e)
+    else:
+        raise AssertionError("an empty line was posted")

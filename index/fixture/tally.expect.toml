@@ -1,0 +1,16 @@
+# What tally's tests expect of the numbers it reads (README.md "Expectations"). No line names the
+# component that writes them: counter claims them here, in counter.expect.toml.
+
+# With nothing given, no numbers stand, and tally sums none.
+[[expect]]
+name = "numbers"
+port = "numbers"
+value = []
+match = "exact"
+
+# Given numbers stand, tally relies on a list of at least one whole number; which, it does not.
+[[expect]]
+name = "numbers"
+port = "numbers"
+given = "numbers stand"
+value = [1, 2, 3]
