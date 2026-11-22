@@ -125,7 +125,7 @@ jobs:
         run: time go vet ./...
       # The budget's reference run (SE's README "Test budget"): over a limit here, check fails. The
       # nightly run is full: it runs every suite beside, also one whose paths the change does not
-      # touch, such as long-step.
+      # touch.
       - name: The complete suite, within its budgets
         env:
           EVENT: ${{ github.event_name }}

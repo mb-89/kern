@@ -14,8 +14,7 @@ uv run --no-project --python ">=3.11" python <se>/scripts/work_tickets.py suite 
 
 - `se.toml` `[tests]` is kern's Go tests, held to their budget; beside them `[tests.beside.python]`
   (the Python SDK's tests in `python/tests`, through the root's `pyproject.toml`),
-  `[tests.beside.template]` (the bare application's tests), `[tests.beside.long-step]` (nightly and
-  where a change touches its `paths`) and `[tests.beside.release-guard]`.
+  `[tests.beside.template]` (the bare application's tests) and `[tests.beside.release-guard]`.
 - The focused tests are the packages a change touches, `go test ./<package>/`, and `uv run pytest
   -q` for a change under `python/`; the complete suite is `work_tickets.py suite`.
 - `gofmt -l $(git ls-files '*.go')` lists nothing: `check` fails on any file it lists.
