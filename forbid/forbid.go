@@ -61,8 +61,21 @@ type Finding struct {
 
 func (f Finding) String() string {
 	owners := strings.Join(f.Owners, " and ")
-	return fmt.Sprintf("%s:%d: %s uses the %s %s, which the I/O module %s forbids: only %s may use it, so reach it through %s's names and verbs",
-		f.File, f.Line, f.Folder, f.Kind, f.Entry, owners, owners, owners)
+	module, forbids := "module "+owners, "forbids"
+	if len(f.Owners) > 1 {
+		module, forbids = "modules "+owners, "forbid"
+	}
+	return fmt.Sprintf("%s:%d: %s uses the %s %s, which the I/O %s %s: only %s may use it, so reach it through %s",
+		f.File, f.Line, f.Folder, f.Kind, f.Entry, module, forbids, owners, reach(f.Owners))
+}
+
+// reach names the owners' names and verbs: "clock's", "clock's or pyclock's".
+func reach(owners []string) string {
+	var each []string
+	for _, o := range owners {
+		each = append(each, o+"'s")
+	}
+	return strings.Join(each, " or ") + " names and verbs"
 }
 
 // Load answers the owners of the forbid lists the checkout at root loads: each

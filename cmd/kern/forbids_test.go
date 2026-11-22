@@ -47,6 +47,8 @@ func TestAComponentThatReadsTheTimeOrRunsGhIsRefused(t *testing.T) {
 		"components/runner/runner.go:15: components/runner uses the command gh, which the I/O module github forbids: only github may use it, so reach it through github's names and verbs",
 		"components/pyrunner/__init__.py:15: components/pyrunner uses the command gh, which the I/O module github forbids",
 		"components/pyrunner/__init__.py:13: components/pyrunner uses the call time.sleep, which the I/O module clock forbids",
+		// an entry two lists hold, the clock's and the declared pyclock's, names both
+		"components/pyrunner/__init__.py:20: components/pyrunner uses the call time.monotonic, which the I/O modules clock and pyclock forbid: only clock and pyclock may use it, so reach it through clock's or pyclock's names and verbs",
 	} {
 		if !strings.Contains(errs.String(), want) {
 			t.Errorf("kern forbids says\n%s\nand names no %q", errs.String(), want)
