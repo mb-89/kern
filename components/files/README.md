@@ -20,6 +20,7 @@ Outside the managed folders nothing changes.
 |---|---|
 | `model` | a family: each managed file at its path's key, `{"path", "hash", "size", "held", "content"}` |
 | `watching` | whether the watcher reported the start's cookie in every managed folder |
+| `folders` | the managed folders as the start read them from `folders`, relative to the root and slash-separated: the checker ([`lsp`](../lsp/README.md)) judges a link into them alone |
 
 - **A file** is its path relative to the checkout's root, slash-separated; its content's SHA-256 in
   hex, `hash`, which is the version a write names; its size; and, where `held`, its content. A text
@@ -46,6 +47,7 @@ config = { folders = ["docs", "notes"] }
 [wires]
 "files.model" = "files/model/<key>"
 "files.watching" = "files/watching"
+"files.folders" = "files/folders"
 ```
 
 ## Verbs

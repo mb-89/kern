@@ -11,6 +11,10 @@ name = "files.watching"
 port = "watching"
 
 [[claim]]
+name = "files.folders"
+port = "folders"
+
+[[claim]]
 name = "files.read"
 verb = "read"
 

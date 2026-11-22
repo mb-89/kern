@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -149,8 +150,11 @@ func TestTheModelHoldsTheManagedFolders(t *testing.T) {
 	s0.put("docs/big.txt", strings.Repeat("x", 40))
 	s0.put("docs/bin.dat", "a\x00b")
 	s0.put("other/c.md", "three\n")
-	s := started(t, root, map[string]any{"folders": []string{"docs"}, "content-limit": 32})
+	s := started(t, root, map[string]any{"folders": []string{"./docs/"}, "content-limit": 32})
 
+	if v, _ := s.fake.Out("folders"); !reflect.DeepEqual(v.V, []string{"docs"}) {
+		t.Fatalf("the managed folders, as the start read them: %v", v.V)
+	}
 	a, ok := s.model("docs/a.md")
 	if !ok || a.Path != "docs/a.md" || a.Content != "one\n" || !a.Held || a.Size != 4 || len(a.Hash) != 64 {
 		t.Fatalf("docs/a.md in the model: %+v (stands: %v)", a, ok)
