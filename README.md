@@ -90,7 +90,8 @@ bare run with `cli.Bare`, and the help renders them all.
   its start, 10 times a second, and `second`, `minute` and `hour`, counters that count up. A
   component that acts on time reads the counter it needs (`index.Reacts`) and keeps its interval
   with a `clock.Relay` over its count, as the GitHub component's refresh does; no component keeps
-  a timer of its own. Every wait for an answer measures its limit
+  a timer of its own, and the clock's forbid list refuses a component that reads the system time
+  itself ([Forbid lists](#forbid-lists)). Every wait for an answer measures its limit
   against the host's clock (`host.Clock`), which a test replaces with a clock it moves itself.
 - **Hooks a command answers.** The wiring's `[hooks]` binds a host's event to a command, such as
   `Stop = "work_tickets.py stop-check"`; the core refuses to start where no instance declares it.

@@ -46,6 +46,19 @@ var (
 	hourOut   = index.Output("hour", 0, "The hours since the clock's start, counting up: it moves once an hour.")
 )
 
+// Forbidden is the clock's forbid list (index.Forbids): reading and waiting on
+// the system time, which only the clock's own code and the host's clock may
+// do. Any other component reads a counter of the clock instead, and a wait for
+// an answer waits on host.Clock (README.md "Forbid lists").
+var Forbidden = index.Forbidden{Calls: []string{
+	// Go
+	"time.Now", "time.Since", "time.Until", "time.Sleep", "time.After", "time.Tick",
+	"time.NewTicker", "time.NewTimer", "time.AfterFunc",
+	// Python
+	"time.time", "time.time_ns", "time.sleep", "time.monotonic", "time.monotonic_ns",
+	"time.perf_counter", "datetime.now", "datetime.utcnow", "datetime.today", "date.today",
+}}
+
 // New makes the component with its outside reached through o.
 func New(o Options) *Clock {
 	if o.Clock == nil {
@@ -53,7 +66,7 @@ func New(o Options) *Clock {
 	}
 	c := &Clock{o: o}
 	c.Component = index.Declare(Name, "Writes time as names: the time since its start, and the seconds, minutes and hours counting up; components read the one they need instead of keeping a timer.",
-		index.IO(), timeOut, secondOut, minuteOut, hourOut,
+		index.IO(), index.Forbids(Forbidden), timeOut, secondOut, minuteOut, hourOut,
 		index.Config("per-second", PerSecond, "The granularity: how often a second time moves, from 1 to 1000."),
 		index.Inlet(c.start),
 	)
