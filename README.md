@@ -30,6 +30,7 @@ named in the design's plan.
 | `python/tests/` | the Python fake's leg of the contract suite and the sample component's test, run by `se.toml` `[tests.beside.python]` | |
 | `release.toml` | kern's version and the one URL its release is published under ([Release](#release)) | |
 | `tools/release/` | builds the release: six archives and `SHA256SUMS` | |
+| `forbid/` | the scan that holds every I/O module to its forbid list: the Go and Python code under `components/` that uses another I/O module's entry ([Forbid lists](#forbid-lists)) | |
 | `tools/expect/` | `pending`: lists the pending expectations per claimer ([Pending expectations](#pending-expectations)) | |
 | `template/` | the bare application every new application starts from ([The template](#the-template)) | |
 
@@ -53,6 +54,7 @@ bare run with `cli.Bare`, and the help renders them all.
 | `kern mcp [--grace D] [--idle D]` | the MCP door over stdio ([The MCP door](#the-mcp-door)): starts the core with the grace and idle given, or attaches to it, and holds a session lease while the client is connected |
 | `kern mcp --tools` | prints the tools the door would serve for the checkout, as `tools/list` answers them, indented JSON in served order, and exits 0: starts no core, takes no lease, reads no input ([The tool list's size](#the-tool-lists-size)) |
 | `kern hook <event> [--wait D] [--unanswered N]` | posts the host's hook JSON from stdin on `hook.<event>`, waiting up to 500 ms for a core whose start's claim stands; prints the answer as the host's hook JSON: the bound command's output, else the context the components told on `PostToolUse`, `UserPromptSubmit` and `SessionStart` (the [GitHub component](components/github/README.md)'s waiting tool calls) as `additionalContext`, nothing for a `pass` with nothing told; where no core answers, prints nothing; exits 0, or N where no command answered the event and nothing was told |
+| `kern forbids [--root DIR]` | scans the checkout's components (`components/`) against the forbid lists of the I/O components the binary carries and those declared there ([Forbid lists](#forbid-lists)): each use of another I/O module's entry is a line on stderr, naming the file, the line, the component's folder and the module that owns it, and the exit is 1; else one line on stdout and 0. It starts no core |
 
 - **The standing file**, `.se/.runtime/standing.json`, readable by its owner alone: the bus's
   address, the pid with its start mark, the boot it runs in, the contract version and every bus
@@ -397,6 +399,50 @@ person's decision of 22 Nov (deck "Who provides the fakes", option B), after Pac
   the base, each pending line appended to the file `KERN_PENDING` names, and lists the pending
   expectations per claimer, so an integrator turns them into requests for that module. Its design
   decides on each: it meets it, or declines it, a judgment call that climbs as an escalation.
+
+## Forbid lists
+
+Only an I/O module reaches its outside thing, and every I/O module declares a forbid list of what
+it replaces: the calls, imports, commands and hosts only its own code may use. Any other
+component that uses an entry is refused, mechanically, before the code is committed. This is the
+person's decision of 22 Nov: a component that reaches past its I/O module is hidden from the index
+and cannot be faked in tests. Prior art: Go's `depguard` and Python's `import-linter`.
+
+```toml
+[forbids]                                    # in component.toml, beside io = true
+calls = ["time.Now", "time.sleep"]           # Go's <import path>.<name>, Python's <module>.<name>
+imports = ["github.com/google/go-github"]    # a package, and every one below it
+commands = ["gh"]                            # a program run by name, named in a string
+hosts = ["api.github.com"]                   # a host named in a string
+```
+
+- **Declared.** A Go component declares it with `index.Forbids(index.Forbidden{...})`, a
+  declared one with `[forbids]` in its `component.toml`; both readers refuse one on a component
+  without the I/O flag, an entry of no kind's form, an entry named twice and a list that names
+  nothing (`contract/declarations.json`). The clock forbids reading and waiting on the system
+  time ([its README](components/clock/README.md)), the GitHub component `gh`, the REST API's host
+  and the Go clients of GitHub ([its README](components/github/README.md)).
+- **The scan** (`forbid/`) reads the Go and Python files under `components/`, but tests
+  (`*_test.go`, `test_*.py`, `*_test.py`, `conftest.py`) and the folders `testdata`, `tests` and
+  hidden ones. In Go it reads each import, each selector of an imported package under any import
+  name, and each string literal; in Python each import, each dotted name with the names an import
+  binds read as what they stand for (`from datetime import datetime as dt` makes `dt.now`
+  `datetime.datetime.now`, which `datetime.now` names), and each string. A comment names nothing.
+  A command is used by a string that is its name or a command line starting with it, a host by a
+  string that holds it between characters no host name holds.
+- **Whose code may use an entry.** The owner's own folder: a Go component's is the folder of the
+  package that declared it (`index.Component.Package`), where that lies in the checkout's Go
+  module; a declared one's is the folder of its `component.toml`. A kern component that an
+  application's binary carries has no folder in the application's checkout, so no code there may
+  use its entries.
+- **When it runs.** Before code is committed, never at start: the catalog check does not scan, as
+  that is too late and costs every start. `kern forbids` (an application's `<name> forbids`) is
+  the command, and `cmd/kern/forbids_test.go` holds kern's own tree to it in `go test ./...`, so
+  the landing's suite and CI's `check` refuse a change that breaks it. SE's commit hook runs no
+  command of a project's yet, so a commit is held to it only once SE's hook runs one.
+- **The core** (`host/`, `bus/`, `cli/`, `mcp/`) is no module and is not scanned: its waits for an
+  answer read `host.Clock`, and the timers check (`kerntest/timers_test.go`) holds every file of
+  kern to starting no timer outside the clock component and the host's clock.
 
 ## Release
 
