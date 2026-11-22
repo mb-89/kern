@@ -16,16 +16,19 @@ A component's tests are answered from its own expectation file instead (README.m
 
     fake = expecting(tally, TALLY / "expect.toml")
     fake.given("numbers stand")               # its inputs read, its requests answered, from the file
+
+Where an I/O module's hot test recorded the real answers beside the file, they answer instead (``kern.record``).
 """
 
 from __future__ import annotations
 
+import datetime
 import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from . import expect
+from . import expect, record
 from .component import Ask, Component, KernError, Result
 from .declaration import CONFIG_PREFIX
 
@@ -55,6 +58,10 @@ class Fake:
         #: Where set, the component's own expectations, which answer its inputs and requests.
         self.expectations: expect.Expectations | None = None
         self._givens: set[str] = set()
+        #: The hot tests' recordings beside the expectation file, by the place of the expectation each answers.
+        self.recorded: dict[int, dict[str, Any]] = {}
+        #: A line for each recording that answers this fake and is older than its set age (README.md "Hot tests").
+        self.stale: list[str] = []
 
     def given(self, *givens: str) -> None:
         """Name the preconditions the test runs under, as ``Fake.Given`` does in Go: each input port reads
@@ -82,7 +89,7 @@ class Fake:
         for port in self.component.decl.inputs:
             self._seeded.pop(port, None)
         for port, e in chosen.items():
-            self._seeded[port] = expect.plain(e.value)
+            self._seeded[port] = expect.plain(self._stated(e))
         self._givens = active
 
     def seed(self, values: dict[str, Any] | None = None, /, **kw: Any) -> None:
@@ -204,9 +211,17 @@ class Fake:
                     continue
                 if e.refused:
                     raise KernError(f"refused, as {e} of {x.file} expects")
-                return expect.plain(e.answer)
+                return expect.plain(self._stated(e))
         raise KernError(f"{x.file}: no expectation answers the request {expect.show(a.value)} on port {a.port}: "
                         "state it there")
+
+    def _stated(self, e: expect.Expectation) -> Any:
+        """What e states the port reads or the request is answered: its recording's where a hot test recorded
+        one, else its own."""
+        r = self.recorded.get(e.n)
+        if r is not None:
+            return r.get("value") if e.port else r.get("answer")
+        return e.value if e.port else e.answer
 
     def out(self, port: str, key: str = "") -> Value:
         """What the component committed to an output, at key for a family, or its built-in value."""
@@ -221,13 +236,19 @@ class Fake:
         return Value(o.builtin, False)
 
 
-def expecting(comp: Component, path: str | Path) -> Fake:
+def expecting(comp: Component, path: str | Path, *, now: datetime.datetime | None = None,
+              max_age: datetime.timedelta = record.RECORDING_AGE) -> Fake:
     """A fake that answers comp's tests from its expectation file, path, as ``kerntest.Expecting`` does: seed
-    and answer are refused, so no test fakes the component on the other side."""
+    and answer are refused, so no test fakes the component on the other side. Where an I/O module's hot test
+    recorded the real answer to an expectation beside path, the fake answers with the recording; it refuses one
+    that no longer fits its expectation, and ``stale`` names each older than max_age at now (README.md "Hot
+    tests")."""
     f = Fake(comp)
     x = expect.read(path)
     x.check(comp.decl)
     f.expectations = x
+    f.recorded = record.read(x)
+    f.stale = record.stale(x, f.recorded, now or datetime.datetime.now(datetime.timezone.utc), max_age)
     f.given()
     return f
 

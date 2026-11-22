@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import expect
+from . import expect, record
 from .component import Component
 from .fake import Fake
 
@@ -108,7 +108,8 @@ def _written(f: Fake, port: str) -> Any:
 def check(wiring: dict, *mods: Module) -> None:
     """The completeness check over a wiring, as ``kerntest.Check``: among the components its switched-on
     instances load, every expectation of a loaded component is claimed by exactly one loaded component and met
-    by it. Raise naming each that is unclaimed, claimed twice or unmet, each in its own words."""
+    by it, and every recording beside a loaded component's file still fits its expectation. Raise naming each that
+    is unclaimed, claimed twice or unmet, and each misfit recording, each in its own words."""
     loaded = {t["component"] for t in wiring.get("instances", {}).values() if t.get("enabled", True)}
     by_name: dict[str, Module] = {}
     for m in mods:
@@ -118,12 +119,16 @@ def check(wiring: dict, *mods: Module) -> None:
             by_name[m.name] = m
     pool: Pool = {}
     claims: dict[str, list[tuple[Module, expect.Claim]]] = {}
+    errs = []
     for n in sorted(by_name):
         x = by_name[n].read()
+        try:
+            record.read(x)
+        except expect.ExpectationError as err:
+            errs.append(str(err))
         _add(pool, x)
         for c in x.claims:
             claims.setdefault(c.name, []).append((by_name[n], c))
-    errs = []
     for e in sorted((e for es in pool.values() for e in es), key=lambda e: (e.file, e.n)):
         cs = claims.get(e.name, [])
         if not cs:

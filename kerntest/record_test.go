@@ -342,3 +342,59 @@ func TestExpectationFilesFindsEveryExpectationFileOutsideTestdata(t *testing.T) 
 		t.Fatalf("found %v", rel)
 	}
 }
+
+// recordCases is kerntest/testdata/record-cases.json, which python/tests
+// holds kern.record to as well.
+type recordCases struct {
+	Cases []struct {
+		Name     string          `json:"name"`
+		File     string          `json:"file"`
+		Recorded json.RawMessage `json:"recorded"`
+		Now      time.Time       `json:"now"`
+		Refusal  string          `json:"refusal"`
+		Stale    []string        `json:"stale"`
+	} `json:"cases"`
+}
+
+func TestRecordingsReadAsTheSharedCasesSay(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile(filepath.Join("testdata", "record-cases.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases recordCases
+	if err := json.Unmarshal(data, &cases); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cases.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			t.Parallel()
+			path := writeFile(t, "reader.expect.toml", c.File)
+			if err := os.WriteFile(kerntest.RecordingsFile(path), c.Recorded, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			named := strings.NewReplacer("<file>", path, "<recorded>", kerntest.RecordingsFile(path))
+			x, err := kerntest.ReadExpectations(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			recs, err := kerntest.ReadRecordings(x)
+			switch {
+			case c.Refusal == "" && err != nil:
+				t.Fatalf("refused: %v", err)
+			case c.Refusal != "" && (err == nil || !strings.Contains(err.Error(), named.Replace(c.Refusal))):
+				t.Fatalf("read %v, want the refusal %q", err, named.Replace(c.Refusal))
+			case c.Refusal != "":
+				return
+			}
+			stale := kerntest.StaleRecordings(x, recs, c.Now, kerntest.RecordingAge)
+			want := make([]string, len(c.Stale))
+			for i, s := range c.Stale {
+				want[i] = named.Replace(s)
+			}
+			if strings.Join(stale, "\n") != strings.Join(want, "\n") {
+				t.Fatalf("stale says %q, want %q", stale, want)
+			}
+		})
+	}
+}

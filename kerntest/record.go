@@ -178,7 +178,13 @@ func (f *Fake) Stale() []string {
 	return append([]string{}, f.stale...)
 }
 
-// staleOf answers the stale lines of recs at now.
+// StaleRecordings answers a line for each recording of recs, the recordings
+// of x, that is older than maxAge at now, naming the expectation, its hot
+// test, when it was recorded and its age, as Fake.Stale does.
+func StaleRecordings(x Expectations, recs map[int]Recording, now time.Time, maxAge time.Duration) []string {
+	return staleOf(x, recs, now, maxAge)
+}
+
 func staleOf(x Expectations, recs map[int]Recording, now time.Time, maxAge time.Duration) []string {
 	var lines []string
 	for _, e := range x.Expect {
@@ -194,12 +200,12 @@ func staleOf(x Expectations, recs map[int]Recording, now time.Time, maxAge time.
 	return lines
 }
 
-// days writes d in whole days where it is one or more, else as Go writes it.
+// days writes d in whole days, or "under a day".
 func days(d time.Duration) string {
-	if d >= 24*time.Hour {
-		return fmt.Sprintf("%d days", int(d/(24*time.Hour)))
+	if d < 24*time.Hour {
+		return "under a day"
 	}
-	return d.String()
+	return fmt.Sprintf("%d days", int(d/(24*time.Hour)))
 }
 
 // Hot is an I/O module's hot test (README.md "Hot tests"): the module as it
