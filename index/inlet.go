@@ -70,6 +70,35 @@ func (p tellsPart) declare(c *Component) {
 // relay waits for.
 func Tells(fn func(instance, event string, payload []byte) string) Part { return tellsPart{fn} }
 
+type guardsPart struct {
+	fn func(instance, event string, payload []byte) string
+}
+
+func (p guardsPart) declare(c *Component) {
+	if c.guards != nil {
+		c.fail("component %s guards the host's events twice", c.name)
+	}
+	c.guards = p.fn
+}
+
+// Guards declares that an I/O component may refuse a host's event, such as a
+// session's PreToolUse that writes a file it owns: after the event is heard,
+// fn answers the reason the hook denies it with, which tells the agent what
+// to do instead, or "" to let it pass. The files component refuses a write to
+// a managed file, naming its own tool, and answers a search over a managed
+// folder from its model as the reason, so the native tool does not run.
+func Guards(fn func(instance, event string, payload []byte) string) Part { return guardsPart{fn} }
+
+// Guard answers, for one instance of the component, the reason its guard
+// denies a host's event with, "" where it passes or the component declares
+// no guard: a fake core asks a component's guard so, as the index's Guard does.
+func (c *Component) Guard(instance, event string, payload []byte) string {
+	if c.guards == nil {
+		return ""
+	}
+	return c.guards(instance, event, payload)
+}
+
 // inlets hands each switched-on instance whose component declares an inlet its commit.
 func (ix *Index) inlets() error {
 	var errs []error
@@ -116,4 +145,19 @@ func (ix *Index) Tell(event string, payload []byte) []string {
 		}
 	}
 	return said
+}
+
+// Guard answers the reason the first switched-on instance whose component
+// guards the host's events denies the event with, in the instances' order,
+// and "" where every one lets it pass. A switched-off instance guards nothing.
+func (ix *Index) Guard(event string, payload []byte) string {
+	for _, in := range ix.order {
+		if !in.enabled || in.comp.guards == nil {
+			continue
+		}
+		if reason := in.comp.guards(in.name, event, payload); reason != "" {
+			return reason
+		}
+	}
+	return ""
 }
