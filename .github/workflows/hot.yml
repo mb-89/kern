@@ -1,0 +1,54 @@
+# kern's hot tests (README.md "Hot tests"): each I/O module met against its real service, on every
+# pull request and push to main that touches an I/O module, and nightly. They run first, then the
+# readers' tests, the complete Go suite, read the recordings they wrote. This is no required check: a
+# failure blocks no unrelated work, and opens an issue, or comments on the one still open.
+name: hot
+
+on:
+  pull_request:
+    paths: ["components/github/**", "kerntest/record.go", ".github/workflows/hot.yml"]
+  push:
+    branches: [main]
+    paths: ["components/github/**", "kerntest/record.go", ".github/workflows/hot.yml"]
+  schedule:
+    - cron: "41 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  hot:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      # The I/O modules first, each against its service: the GitHub component reads this checkout's
+      # own home with the job's token.
+      - name: The GitHub component's hot test
+        env:
+          KERN_HOT: "1"
+          GH_TOKEN: ${{ github.token }}
+        run: go test -count=1 -v -run '^TestHot$' ./components/github/
+      # Then the readers, answered from the recordings the hot tests just wrote.
+      - name: The readers' tests, from the fresh recordings
+        run: go test ./...
+      - name: A failure opens an issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref_name }}
+        run: |
+          title="hot test failed"
+          body="The hot tests failed on ${EVENT} at ${REF}: ${RUN}. An I/O module no longer meets an expectation against its real service, or a reader no longer fits a recording (README.md 'Hot tests')."
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi

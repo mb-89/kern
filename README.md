@@ -13,8 +13,8 @@ named in the design's plan.
 |---|---|---|
 | `go.mod` | the module and its pinned Go version, which CI reads | |
 | `index/` | names, families, the store, snapshots, a single writer per name, built-in values, the catalog check at start, waves, actions, the collector, and `wiring.toml` read at start | `src/index` at `ff01204` |
-| `index/fixture/` | the fixture components the index and the fake core are tested with, and their expectation files ([Expectations](#expectations)) | `src/index/fixture` |
-| `kerntest/` | the Go fake core: seed by local name, run, assert writes and requests, answer each request, give a call up as the core does (`Begin`, `BeginServe`, `Abandon`, `Gone`); answer a component from its expectations, meet the pooled ones it claims, and check a wiring's completeness ([Expectations](#expectations)) | `src/index/indextest` |
+| `index/fixture/` | the fixture components the index and the fake core are tested with, their expectation files ([Expectations](#expectations)), and the recordings a hot test wrote beside the watcher's ([Hot tests](#hot-tests)) | `src/index/fixture` |
+| `kerntest/` | the Go fake core: seed by local name, run, assert writes and requests, answer each request, give a call up as the core does (`Begin`, `BeginServe`, `Abandon`, `Gone`); answer a component from its expectations, meet the pooled ones it claims, and check a wiring's completeness ([Expectations](#expectations)); an I/O module's hot test and the recordings it writes ([Hot tests](#hot-tests)) | `src/index/indextest` |
 | `bus/` | the embedded NATS server on loopback, a user and permissions per component instance, so the bus refuses a second writer | quackitect v5 `src/index/bus.go` |
 | `host/` | the core's process: the standing file, the detached start and its claim file, leases, placements, the idle end | v5 `src/index/detach*.go`, `start.go`, `door.go` |
 | `git/` | kern's git door: every git command kern and SE's Go components run, real git outside tests and the fake (`git/gitfake/`) in them, both held to one contract (`git/contract_test.go`); a test that chose no backend is refused real git, and `SE_GIT_DOOR` picks a process's backend, its `fake:<state file>` read from the state SE's Python fake writes (`git/gitfake/state.go`) | SE's `scripts/git_door.py` |
@@ -25,7 +25,7 @@ named in the design's plan.
 | `components/session/` | the session record, off by default: one JSON line per host event, a file per session under `.se/.runtime/sessions/` ([its README](components/session/README.md)) | |
 | `contract/` | the contract suite: the built binary held to the bus's and the host's promises, and `cases.json` held against the Go fake, the Python fake and the real core with a Python component attached | |
 | `contract/fixture/` | tally, the suite's fixture and the sample Python component (`component.toml`, `__init__.py`), and the declarations of the two peers the real leg plays | |
-| `python/kern/` | the Python SDK, standard library only: the NATS peer, `component.toml`'s reader, the component and its decorators, the fake core, expectations and their pool (`expect.py`, `pool.py`), the runner `python -m kern run <folder>` | |
+| `python/kern/` | the Python SDK, standard library only: the NATS peer, `component.toml`'s reader, the component and its decorators, the fake core, expectations and their pool (`expect.py`, `pool.py`), a hot test's recordings (`record.py`), the runner `python -m kern run <folder>` | |
 | `python/tests/` | the Python fake's leg of the contract suite and the sample component's test, run by `se.toml` `[tests.beside.python]` | |
 | `release.toml` | kern's version and the one URL its release is published under ([Release](#release)) | |
 | `tools/release/` | builds the release: six archives and `SHA256SUMS` | |
@@ -305,6 +305,51 @@ verb = "append"
   A wiring that loads them is complete, and one without counter leaves `numbers` unclaimed.
   `kerntest/testdata/expect-cases.json` holds the Go and Python readers to the same refusals and
   matches.
+
+## Hot tests
+
+An I/O module reaches the outside world, and its fake answers from memory. Its hot test, its run
+against the real service, is the only proof that the fake tells the truth. So the hot test meets
+every expectation pooled under the names the module claims against the real service, and records
+each real answer beside the expectation it met. The readers' fakes then answer with those
+recordings. This is the person's decision of 22 Nov (deck "Who provides the fakes", option B):
+hand-written answers for outside services were not picked, since nothing checks them against the
+world.
+
+- **One command runs it.** `KERN_HOT=1 go test -count=1 -run '^TestHot$' ./components/github/`
+  is the GitHub component's. `kerntest.Hot{Name, Module, Ask, Answer}.Record(pool)` meets the pool
+  of every expectation file in the checkout (`kerntest.ExpectationFiles`). The module's `Start`
+  sets each fresh fake up against the real service and starts it (`Fake.Start` runs its inlet),
+  and `Fresh` makes it a component of its own each time. Without `KERN_HOT` the test is skipped,
+  and the normal suite meets the same pool against the module's fake service
+  (`Module.Meet`, `kerntest.Check`).
+- **A recording** stands beside its reader's expectation file, `<file>.recorded.json` beside
+  `<file>.toml`. Each names its expectation (its place, name, port or request, given and ask), its
+  hot test and the time it was recorded. Its value or answer is the real one, trimmed to the keys
+  and items the expectation states. So it holds what the reader relies on and nothing else of the
+  service, and no recording names kern's home (the GitHub hot test also writes the home back as
+  the placeholders `owner` and `repo`).
+- **The reader's fake answers from it.** `kerntest.Expecting` and `kern.fake.expecting` answer an
+  expectation with its recording where one exists, else with what the file states. `Stale()`
+  (`stale` in Python) names each recording older than `kerntest.RecordingAge`, 30 days, or the age
+  the test sets (`MaxAge`, `max_age`). Such a recording still answers.
+- **A recording that no longer fits its expectation fails.** One whose value or answer no longer
+  meets its expectation, or that is of another name, port, request, given or ask, or of an
+  expectation its file no longer holds, is refused as `misfit` by the reader's fake and by the
+  completeness check, naming the hot test to run again. A hot run that fails keeps the earlier
+  recordings of what it did not meet, to age, and drops those that no longer fit.
+  `kerntest/testdata/record-cases.json` holds the Go and Python readers to the same refusals and
+  stale lines.
+- **The order.** The hot tests run first and the readers' tests read what they recorded:
+  `.github/workflows/hot.yml` runs each I/O module's hot test, then the complete Go suite. It runs
+  on every pull request and push to `main` that touches an I/O module, and nightly. It is no
+  required check, so its failure blocks no unrelated work: it opens an issue, `hot test failed`,
+  or comments on the one still open. A change to an I/O module runs its hot test and commits the
+  recordings it writes.
+- **The worked example.** The GitHub component claims `github.issues` and its read verbs
+  (`components/github/expect.toml`, `hot_test.go`). The watcher fixture
+  (`index/fixture/watcher.expect.toml`) expects `github.issue` and `github.issues`, and its test
+  is answered from the real recordings beside it.
 
 ## Release
 
