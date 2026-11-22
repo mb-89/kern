@@ -233,7 +233,9 @@ type reach struct{ ask, answer func(any) any }
 
 // Meet holds the module to every expectation in pool on the names it claims,
 // as Module.Meet does, through Ask and Answer, and answers the
-// recording of each one it met. It answers each one it does not meet.
+// recording of each one it met. It answers each one it does not meet, except
+// a pending one, which it records nothing of and appends to ReportVariable's
+// file, where it is set.
 func (h Hot) Meet(pool Pool) ([]Recording, error) {
 	x, err := h.Module.read()
 	if err != nil {
@@ -249,7 +251,13 @@ func (h Hot) Meet(pool Pool) ([]Recording, error) {
 	for _, cl := range x.Claims {
 		for _, e := range pool[cl.Name] {
 			got, err := h.Module.answer(cl, e, r)
-			if err != nil {
+			switch {
+			case err != nil && e.New:
+				// Pending (README.md "Pending expectations"): it fails no hot
+				// run and is recorded once the module meets it.
+				errs = append(errs, report(Pending{Expectation: e, Claimer: h.Module.Component.Name(), Why: err}))
+				continue
+			case err != nil:
 				errs = append(errs, unmet(h.Module, e, err))
 				continue
 			}

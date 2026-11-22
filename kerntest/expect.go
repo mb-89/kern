@@ -74,6 +74,9 @@ type Expectation struct {
 	// File is the reader's expectation file and N the expectation's place in it, from 1.
 	File string
 	N    int
+	// New is set where the pool's base holds no expectation with these terms
+	// in the reader's file (pending.go); no file sets it.
+	New bool
 }
 
 // Claim is a name a component writes on one of its output ports, or a request

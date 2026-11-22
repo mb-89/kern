@@ -29,6 +29,7 @@ named in the design's plan.
 | `python/tests/` | the Python fake's leg of the contract suite and the sample component's test, run by `se.toml` `[tests.beside.python]` | |
 | `release.toml` | kern's version and the one URL its release is published under ([Release](#release)) | |
 | `tools/release/` | builds the release: six archives and `SHA256SUMS` | |
+| `tools/expect/` | `pending`: lists the pending expectations per claimer ([Pending expectations](#pending-expectations)) | |
 | `template/` | the bare application every new application starts from ([The template](#the-template)) | |
 
 The NATS server is a Go dependency, `github.com/nats-io/nats-server/v2` v2.11.9 with
@@ -350,6 +351,45 @@ world.
   (`components/github/expect.toml`, `hot_test.go`). The watcher fixture
   (`index/fixture/watcher.expect.toml`) expects `github.issue` and `github.issues`, and its test
   is answered from the real recordings beside it.
+
+## Pending expectations
+
+A reader's new expectation is an input to its reader, never an order to its claimer: it is pending
+until its claimer first meets it, and while it is pending it blocks only its reader. This is the
+person's decision of 22 Nov (deck "Who provides the fakes", option B), after Pact's pending pacts.
+
+- **No flag.** Nothing stores that an expectation is pending. The reader's check refuses to land a
+  change whose expectation its claimer does not meet, so every expectation the integration branch
+  holds is one its claimer met when it landed. An expectation is **new** where the reader's file
+  at the base holds none with the same terms (its place in the file does not count), and
+  **pending** where it is new and its claimer's test, run now, does not meet it.
+- **The base** is the git revision `KERN_EXPECT_BASE` names, such as `origin/main`, read with real
+  git by `kerntest.ReadPool` and `kerntest.Check`: the variable is the choice the git door asks
+  of a test binary, and the read only shows files. Unset, there is no base and every expectation
+  counts as landed, as on the integration branch itself. A file no repository holds counts as
+  landed; a file the base lacks is new throughout. `kerntest.ReadPoolSince(base, files...)` and
+  `kerntest.CheckSince(base, wiring, modules...)` take the base as a `kerntest.Base`, and
+  `kerntest.GitBase(backend, ref)` is the one `KERN_EXPECT_BASE` names.
+- **The claimer's test** stays green: `Module.Meet(pool)` fails only on landed expectations, as
+  `unmet`, and `Module.MeetPending(pool)` also answers the pending ones, each a line `pending: name
+  "numbers": expect 6 (port numbers, given "four numbers stand") of tally.expect.toml waits on
+  counter, which does not meet it yet: <why>`, which the test logs.
+- **The reader's check** refuses the change with the same line, naming the claimer that must meet
+  it. Once the claimer meets it, the two land and the expectation is an ordinary one.
+- **Hot tests and recordings** ([Hot tests](#hot-tests)). A hot run (`kerntest.Hot.Meet`,
+  `Record`) is a claimer's test too: a pending expectation fails it not, it records nothing of it,
+  and it appends the pending line to `KERN_PENDING`'s file; once met and landed, the hot run
+  records it like any other. A recording is checked against the reader's file as it stands,
+  pending or not, so the completeness check refuses a `misfit` beside a pending expectation as it
+  does elsewhere, and a reader's fake answers a pending expectation from its file until a hot run
+  records it.
+- **In Python**, `kern.pool.read_pool(files..., base=...)`, `Module(...).meet(pool)`, which answers
+  the pending ones, and `kern.pool.check(wiring, modules..., base=...)` are the same, with
+  `kern.pool.git_base(ref)` the base `KERN_EXPECT_BASE` names.
+- **The requests.** `go run ./tools/expect pending [--base origin/main]` runs kern's tests against
+  the base, each pending line appended to the file `KERN_PENDING` names, and lists the pending
+  expectations per claimer, so an integrator turns them into requests for that module. Its design
+  decides on each: it meets it, or declines it, a judgment call that climbs as an escalation.
 
 ## Release
 

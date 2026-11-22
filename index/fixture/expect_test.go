@@ -76,6 +76,17 @@ func ledger() kerntest.Module {
 		}}}
 }
 
+// meet is a writer's test: it fails on each expectation m does not meet, and
+// reports each pending one without failing.
+func meet(t *testing.T, m kerntest.Module, pool kerntest.Pool) {
+	t.Helper()
+	pending, err := m.MeetPending(pool)
+	for _, p := range pending {
+		t.Log(p)
+	}
+	must(t, err)
+}
+
 func TestCountersTestMeetsThePooledExpectationsOfNumbers(t *testing.T) {
 	t.Parallel()
 	pool, err := kerntest.ReadPool("tally.expect.toml", "clerk.expect.toml", pythonTally)
@@ -83,7 +94,7 @@ func TestCountersTestMeetsThePooledExpectationsOfNumbers(t *testing.T) {
 	if len(pool["numbers"]) != 4 {
 		t.Fatalf("the pool holds %d expectations of numbers, want tally's two and the Python tally's two", len(pool["numbers"]))
 	}
-	must(t, counter().Meet(pool))
+	meet(t, counter(), pool)
 }
 
 func TestLedgersTestMeetsThePooledExpectationsOfLinesAppend(t *testing.T) {
@@ -93,7 +104,7 @@ func TestLedgersTestMeetsThePooledExpectationsOfLinesAppend(t *testing.T) {
 	if len(pool["lines.append"]) != 5 {
 		t.Fatalf("the pool holds %d expectations of lines.append, want the clerk's three and the Python tally's two", len(pool["lines.append"]))
 	}
-	must(t, ledger().Meet(pool))
+	meet(t, ledger(), pool)
 }
 
 func TestTheFixturesWiringsAreComplete(t *testing.T) {

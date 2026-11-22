@@ -19,7 +19,17 @@ import (
 // file. Two components that claim one name pass where no wiring loads both.
 // mods are the components the check may find loaded; one the wiring does not
 // load is left out, its expectations and its claims with it.
+//
+// Each reader's file is read against the base BaseVariable names, if any. A
+// new expectation its claimer does not meet is pending: the check refuses it
+// as such, naming the claimer that must meet it, and appends it to
+// ReportVariable's file, where it is set.
 func Check(w index.Wiring, mods ...Module) error {
+	return CheckSince(environmentBase(), w, mods...)
+}
+
+// CheckSince is Check against base; a nil base holds every expectation.
+func CheckSince(base Base, w index.Wiring, mods ...Module) error {
 	loaded := map[string]bool{}
 	for _, in := range w.Instances {
 		if in.Enabled {
@@ -49,8 +59,13 @@ func Check(w index.Wiring, mods ...Module) error {
 		if err != nil {
 			return err
 		}
+		// A recording is of the reader's file as it stands, pending or not:
+		// a misfit refuses either way.
 		if _, err := ReadRecordings(x); err != nil {
 			misfit = append(misfit, err)
+		}
+		if x, err = since(base, x); err != nil {
+			return err
 		}
 		pool.add(x)
 		for _, cl := range x.Claims {
@@ -74,7 +89,13 @@ func Check(w index.Wiring, mods ...Module) error {
 		case 0:
 			errs = append(errs, fmt.Errorf("unclaimed: name %q: no loaded component claims %s of %s", e.Name, e, e.File))
 		case 1:
-			if err := cs[0].m.meet(cs[0].cl, e); err != nil {
+			err := cs[0].m.meet(cs[0].cl, e)
+			switch {
+			case err == nil:
+			case e.New:
+				p := Pending{Expectation: e, Claimer: cs[0].m.Component.Name(), Why: err}
+				errs = append(errs, p, report(p))
+			default:
 				errs = append(errs, unmet(cs[0].m, e, err))
 			}
 		default:
