@@ -542,7 +542,7 @@ func TestACommitOfTheWrongTypeIsRefused(t *testing.T) {
 	}
 }
 
-// A placed instance that declares a derivation or a command is refused at start, with its wiring line.
+// A placed instance that declares a derivation, a command or a reaction is refused at start, with its wiring line.
 func TestAPlacementTheCoreCannotRunIsRefused(t *testing.T) {
 	t.Parallel()
 	tally := index.Declare("tally", "Sums.", index.Derived("total", 0, "The sum.", func(struct{}) (int, error) { return 0, nil }))
@@ -550,6 +550,15 @@ func TestAPlacementTheCoreCannotRunIsRefused(t *testing.T) {
 		Wires: []index.Wire{{Port: "tally.total", To: "sum", Line: 5}}}
 	if _, err := host.Serve(host.Options{Root: t.TempDir(), Clock: newClock(), Wiring: w, Components: []*index.Component{tally}}); err == nil || !strings.Contains(err.Error(), "wiring line 3: instance tally is placed") {
 		t.Fatalf("a placed derivation starts with %v, and wants a refusal at its wiring line", err)
+	}
+	poller := index.Declare("poller", "Runs on each second.", index.IO(), index.Reacts(func(string, struct {
+		Second time.Time `index:"second"`
+	}) {
+	}))
+	w = index.Wiring{Instances: []index.Instance{{Name: "poller", Component: "poller", Enabled: true, Config: map[string]index.ConfigValue{}, Command: []string{"poller"}, CommandLine: 3, Line: 1}},
+		Wires: []index.Wire{{Port: "poller.second", To: index.BuiltIn, Line: 5}}}
+	if _, err := host.Serve(host.Options{Root: t.TempDir(), Clock: newClock(), Wiring: w, Components: []*index.Component{poller}}); err == nil || !strings.Contains(err.Error(), "wiring line 3: instance poller is placed") {
+		t.Fatalf("a placed reaction starts with %v, and wants a refusal at its wiring line", err)
 	}
 }
 

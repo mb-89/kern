@@ -266,6 +266,11 @@ func (f *Fake) Start(instance string) error {
 	})
 }
 
+// React runs the component's reaction for instance on the fake's inputs as
+// they stand, as the core does after a commit that changes one: a test seeds
+// the input it reacts to, such as the clock's second, then calls React.
+func (f *Fake) React(instance string) error { return f.c.React(instance, f.read) }
+
 // Derive runs the derivation of an output and commits what it answers.
 func (f *Fake) Derive(port string) error {
 	v, err := f.c.Derive(port, f.read)

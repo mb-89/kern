@@ -55,7 +55,15 @@ var lister = func() *index.Component {
 // listWiring is a checkout's wiring with the component and the lister.
 func listWiring(t *testing.T, config string) index.Wiring {
 	t.Helper()
-	w, err := index.ParseWiring([]byte(fmt.Sprintf(`
+	w, err := index.ParseWiring([]byte(listWiringSrc(config)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return w
+}
+
+func listWiringSrc(config string) string {
+	return fmt.Sprintf(`
 [instances.github]
 component = "github"
 config = { %s }
@@ -64,6 +72,7 @@ config = { %s }
 component = "lister"
 
 [wires]
+"github.second" = "built-in"
 "github.issue-lists" = "github/issue-lists/<key>"
 "github.pull-lists" = "github/pull-lists/<key>"
 "github.comments" = "github/comments/<key>"
@@ -71,11 +80,7 @@ component = "lister"
 "lister.issues" = "github.issue-list"
 "lister.pulls" = "github.pull-list"
 "lister.comments" = "github.comment-list"
-`, config)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return w
+`, config)
 }
 
 func startedLists(t *testing.T, o github.Options, w index.Wiring) *index.Index {
@@ -123,9 +128,13 @@ func TestTheTokenBackendListsEveryPageWithETags(t *testing.T) {
 	t.Parallel()
 	f, api := pagedFake(t)
 	clk := &clock{now: nine}
-	var refresh func()
-	ix := startedLists(t, github.Options{Now: clk.Now, Token: token(""), Cloud: notCloud, Every: func(_ time.Duration, fn func()) { refresh = fn }},
-		listWiring(t, fmt.Sprintf(`api = %q`, api)))
+	b := newBeat()
+	ix, err := index.Start(beating(t, listWiringSrc(fmt.Sprintf(`api = %q`, api))),
+		github.New(github.Options{Clock: clk, Token: token(""), Cloud: notCloud, Go: func(fn func()) { fn() }}).Component, lister, b.component)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.at(t, nine)
 	r, err := ix.Call("list", "issues", "Alice", "demo", "", "work")
 	if err != nil || r.Text != "[12 9], read 2026-11-13T09:00:00Z via token" {
 		t.Fatalf("list issues answers %q, %v, and wants both pages without the pull request", r.Text, err)
@@ -146,7 +155,7 @@ func TestTheTokenBackendListsEveryPageWithETags(t *testing.T) {
 	}
 	_, before := f.log()
 	clk.move(2 * time.Minute)
-	refresh()
+	b.at(t, nine.Add(2*time.Minute))
 	asked, answered := f.log()
 	if again := fmt.Sprint(answered[len(before):]); again != "[304 304 304 304 304]" {
 		t.Fatalf("the refresh was answered %v, and wants every page of the three reads 304: asked %q", again, asked[len(before):])
@@ -172,7 +181,7 @@ func TestTheTokenBackendPacesAListsPages(t *testing.T) {
 	}}
 	clk := &clock{now: nine}
 	var slept []time.Duration
-	ix := startedLists(t, github.Options{Now: clk.Now, Token: token(""), Cloud: notCloud, Every: func(time.Duration, func()) {},
+	ix := startedLists(t, github.Options{Clock: clk, Token: token(""), Cloud: notCloud,
 		Sleep: func(d time.Duration) { slept = append(slept, d); clk.move(d) }}, listWiring(t, fmt.Sprintf(`api = %q`, api)))
 	r, err := ix.Call("comments", "alice", "demo", "7")
 	if err != nil || r.Text != "[101 102 103], read 2026-11-13T09:00:05Z via token" || fmt.Sprint(slept) != "[5s]" {
@@ -213,7 +222,7 @@ func issuesPage(numbers []int, next string) string {
 func TestTheRelayListsIssuesPageByPage(t *testing.T) {
 	t.Parallel()
 	clk := &clock{now: nine}
-	ix := startedLists(t, github.Options{Now: clk.Now, Token: noToken}, listWiring(t, ``))
+	ix := startedLists(t, github.Options{Clock: clk, Token: noToken}, listWiring(t, ``))
 	_, err := ix.Call("list", "issues", "alice", "demo", "open", "work")
 	if err == nil || !strings.Contains(err.Error(), `run the GitHub tool list_issues with {"labels":["work"],"owner":"alice","perPage":100,"repo":"demo","state":"OPEN"}; outbox step issue-list.alice.demo.open.work`) {
 		t.Fatalf("the list answers %v, and wants it to name the first page's call", err)
@@ -270,7 +279,7 @@ func numbered(from, n int, field string) string {
 // relay-wait the list waits through every page.
 func TestTheRelayListsPullsPageByPage(t *testing.T) {
 	t.Parallel()
-	ix := startedLists(t, github.Options{Now: (&clock{now: nine}).Now, Token: noToken}, listWiring(t, `relay-wait = "10s"`))
+	ix := startedLists(t, github.Options{Clock: &clock{now: nine}, Token: noToken}, listWiring(t, `relay-wait = "10s"`))
 	go func() {
 		pages := map[float64]string{1: numbered(1, 100, "number"), 2: numbered(101, 1, "number")}
 		for len(pages) > 0 {
@@ -298,7 +307,7 @@ func TestTheRelayListsPullsPageByPage(t *testing.T) {
 // request's comments read through pull_request_read land at the same key.
 func TestTheRelayReadsCommentsPageByPage(t *testing.T) {
 	t.Parallel()
-	ix := startedLists(t, github.Options{Now: (&clock{now: nine}).Now, Token: noToken}, listWiring(t, ``))
+	ix := startedLists(t, github.Options{Clock: &clock{now: nine}, Token: noToken}, listWiring(t, ``))
 	if _, err := ix.Call("comments", "alice", "demo", "7"); err == nil ||
 		!strings.Contains(err.Error(), `issue_read with {"issue_number":7,"method":"get_comments","owner":"alice","perPage":100,"repo":"demo"}`) {
 		t.Fatalf("comments answers %v, and wants the first page's call", err)
@@ -331,7 +340,7 @@ func TestTheRelayReadsCommentsPageByPage(t *testing.T) {
 // answer land nothing.
 func TestAnUnaskedListLandsOnlyWhole(t *testing.T) {
 	t.Parallel()
-	ix := startedLists(t, github.Options{Now: (&clock{now: nine}).Now, Token: noToken}, listWiring(t, ``))
+	ix := startedLists(t, github.Options{Clock: &clock{now: nine}, Token: noToken}, listWiring(t, ``))
 	before := ix.Snapshot().Revision()
 	for _, p := range [][]byte{
 		toolUse("mcp__github__list_issues", map[string]any{"owner": "alice", "repo": "demo"}, issuesPage([]int{3}, "bW9yZQ==")),

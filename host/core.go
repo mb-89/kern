@@ -278,8 +278,8 @@ func (c *Core) place() error {
 			continue
 		}
 		comp := comps[in.Component]
-		if !comp.Declared() && (len(comp.Derivations()) > 0 || len(comp.Commands()) > 0) {
-			return fmt.Errorf("kern serve: wiring line %d: instance %s is placed, and its component %s declares a derivation or a command, which runs in the core until a placed process answers run and cmd", in.CommandLine, in.Name, in.Component)
+		if !comp.Declared() && (len(comp.Derivations()) > 0 || len(comp.Commands()) > 0 || len(comp.Reaction()) > 0) {
+			return fmt.Errorf("kern serve: wiring line %d: instance %s is placed, and its component %s declares a derivation, a command or a reaction, which runs in the core until a placed process answers run and cmd", in.CommandLine, in.Name, in.Component)
 		}
 		c.placed[in.Name] = true
 	}

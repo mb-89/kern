@@ -77,6 +77,7 @@ config = { ` + config + ` }
 component = "stepper"
 
 [wires]
+"github.second" = "built-in"
 "github.outbox" = "github/outbox/<key>"
 "stepper.step" = "github.step"
 `))
@@ -130,7 +131,7 @@ func call(ix *index.Index, args ...string) chan called {
 // answer carries the input it sent.
 func TestAStepWaitsForTheToolUseThatMatchesIt(t *testing.T) {
 	t.Parallel()
-	g, ix := startedSteps(t, github.Options{Now: (&clock{now: nine}).Now, Token: noToken}, ``)
+	g, ix := startedSteps(t, github.Options{Clock: &clock{now: nine}, Token: noToken}, ``)
 	body := strings.Repeat("a body line\n", 40)
 	in, _ := json.Marshal(map[string]any{"owner": "alice", "repo": "demo", "pullNumber": 8, "merge_method": "squash", "commit_message": body})
 	done := call(ix, "merge_pull_request", string(in))
@@ -170,7 +171,7 @@ func TestAStepWaitsForTheToolUseThatMatchesIt(t *testing.T) {
 // no JSON as its text, and an error answer as the step's failure.
 func TestAStepAnswersTheToolsAnswer(t *testing.T) {
 	t.Parallel()
-	g, ix := startedSteps(t, github.Options{Now: (&clock{now: nine}).Now, Token: noToken}, ``)
+	g, ix := startedSteps(t, github.Options{Clock: &clock{now: nine}, Token: noToken}, ``)
 	done := call(ix, "add_issue_comment", `{"owner": "alice", "repo": "demo", "issue_number": 7, "body": "Landed.", "then": "issue_write"}`)
 	waitOutbox(t, g, "add_issue_comment")
 	if err := ix.Hear(github.PostToolUse, toolUse("mcp__github__add_issue_comment",
@@ -206,11 +207,11 @@ func TestAStepAnswersTheToolsAnswer(t *testing.T) {
 // Only the relay runs steps; a step without a tool or input is refused.
 func TestOnlyTheRelayRunsSteps(t *testing.T) {
 	t.Parallel()
-	_, ix := startedSteps(t, github.Options{Now: (&clock{now: nine}).Now, Token: token(""), Cloud: notCloud}, ``)
+	_, ix := startedSteps(t, github.Options{Clock: &clock{now: nine}, Token: token(""), Cloud: notCloud}, ``)
 	if _, err := ix.Call("run", "merge_pull_request", `{"owner": "alice"}`); err == nil || !strings.Contains(err.Error(), `the backend is "token": only the relay runs`) {
 		t.Fatalf("a step through the token answers %v", err)
 	}
-	_, ix = startedSteps(t, github.Options{Now: (&clock{now: nine}).Now, Token: noToken}, ``)
+	_, ix = startedSteps(t, github.Options{Clock: &clock{now: nine}, Token: noToken}, ``)
 	if _, err := ix.Call("run", "mcp__github__merge_pull_request", `{}`); err == nil || !strings.Contains(err.Error(), "the tool's bare name") {
 		t.Fatalf("a step named with its server answers %v", err)
 	}
@@ -221,7 +222,7 @@ func TestOnlyTheRelayRunsSteps(t *testing.T) {
 // nothing.
 func TestTheHookOfAnAnswerTellsTheNextStep(t *testing.T) {
 	t.Parallel()
-	g, ix := startedSteps(t, github.Options{Now: (&clock{now: nine}).Now, Token: noToken}, `tell-wait = "10s"`)
+	g, ix := startedSteps(t, github.Options{Clock: &clock{now: nine}, Token: noToken}, `tell-wait = "10s"`)
 	done := call(ix, "add_issue_comment", `{"owner": "alice", "repo": "demo", "issue_number": 7, "body": "x", "then": "issue_write"}`)
 	waitOutbox(t, g, "add_issue_comment")
 	if said := ix.Tell("Stop", nil); len(said) != 0 {
@@ -246,8 +247,8 @@ func TestTheHookOfAnAnswerTellsTheNextStep(t *testing.T) {
 // prints the next step as the host's hook JSON, which hands it the agent.
 func TestAHookPrintsTheRelaysStepsAsContext(t *testing.T) {
 	t.Parallel()
-	g := github.New(github.Options{Now: (&clock{now: nine}).Now, Token: noToken})
-	c, err := host.Serve(host.Options{Root: t.TempDir(), Wiring: stepWiring(t, ``), Components: []*index.Component{g.Component, stepper}})
+	g := github.New(github.Options{Clock: &clock{now: nine}, Token: noToken})
+	c, err := host.Serve(host.Options{Root: t.TempDir(), Wiring: stepWiring(t, `tell-wait = "0s"`), Components: []*index.Component{g.Component, stepper}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +288,7 @@ func TestAHookPrintsTheRelaysStepsAsContext(t *testing.T) {
 // waits for, and the outbox name holds it no longer.
 func TestAGivenUpCallsStepLeavesTheOutbox(t *testing.T) {
 	t.Parallel()
-	g, ix := startedSteps(t, github.Options{Now: (&clock{now: nine}).Now, Token: noToken}, ``)
+	g, ix := startedSteps(t, github.Options{Clock: &clock{now: nine}, Token: noToken}, ``)
 	ctx, cancel := context.WithCancelCause(context.Background())
 	done := make(chan error, 1)
 	go func() {
@@ -334,7 +335,7 @@ func TestAGivenUpCallsStepLeavesTheOutbox(t *testing.T) {
 // numbered step waits, the line says so.
 func TestAnAnswerToAnOldStepIsRefusedInOneLine(t *testing.T) {
 	t.Parallel()
-	g, ix := startedSteps(t, github.Options{Now: (&clock{now: nine}).Now, Token: noToken}, `tell-wait = "10s"`)
+	g, ix := startedSteps(t, github.Options{Clock: &clock{now: nine}, Token: noToken}, `tell-wait = "10s"`)
 	done := call(ix, "add_issue_comment", `{"owner": "alice", "repo": "demo", "issue_number": 7, "body": "x", "step": 1, "then": "issue_write"}`)
 	waitOutbox(t, g, "step 1: note add_issue_comment")
 	first := toolUse("mcp__github__add_issue_comment", map[string]any{"owner": "alice", "repo": "demo", "issue_number": 7, "body": "x", "step": 1, "then": "issue_write"}, `{}`)
@@ -384,7 +385,7 @@ func TestAnAnswerToAnOldStepIsRefusedInOneLine(t *testing.T) {
 func TestTwoStepsOneAnswerMatchesAreAnsweredOldestFirst(t *testing.T) {
 	t.Parallel()
 	c := &clock{now: nine}
-	g, ix := startedSteps(t, github.Options{Now: c.Now, Token: noToken}, ``)
+	g, ix := startedSteps(t, github.Options{Clock: c, Token: noToken}, ``)
 	asks := []map[string]any{
 		{"owner": "alice", "repo": "demo", "issue_number": 7.0, "body": "x"},
 		{"owner": "alice", "repo": "demo", "issue_number": 7.0},

@@ -164,6 +164,13 @@ type Component struct {
 	hears func(instance, event string, payload []byte) error
 	// tells is an I/O component's word to the agent on the host's events.
 	tells func(instance, event string, payload []byte) string
+	// react is an I/O component's run on a change of a name it reads, such as the clock's second.
+	react *reaction
+}
+
+type reaction struct {
+	in  inputStruct
+	run func(instance string, in reflect.Value)
 }
 
 type derivation struct {
@@ -235,8 +242,8 @@ func Declare(name, help string, parts ...Part) *Component {
 	if len(c.verbs) > 0 && !c.io {
 		c.fail("component %s accepts verbs but carries no I/O flag: only an I/O component reaches the outside", name)
 	}
-	if (c.inlet != nil || c.hears != nil || c.tells != nil) && !c.io {
-		c.fail("component %s commits on its own or hears the host's events but carries no I/O flag", name)
+	if (c.inlet != nil || c.hears != nil || c.tells != nil || c.react != nil) && !c.io {
+		c.fail("component %s commits on its own, hears the host's events or reacts to a change but carries no I/O flag", name)
 	}
 	return c
 }
@@ -319,6 +326,31 @@ func (c *Component) ReadsOf(name string) []string {
 	if k, ok := c.commands[name]; ok {
 		return k.in.ports
 	}
+	return nil
+}
+
+// Reaction answers the local input ports the component's reaction reads, or
+// none where it declares no reaction.
+func (c *Component) Reaction() []string {
+	if c.react == nil {
+		return nil
+	}
+	return c.react.in.ports
+}
+
+// React runs the component's reaction for one instance on what read answers,
+// as the index does after a commit that changes a name it reads: a fake core
+// drives an I/O component's reaction so. A component that declares none has
+// nothing to do.
+func (c *Component) React(instance string, read Reader) error {
+	if c.react == nil {
+		return nil
+	}
+	v, err := c.react.in.fill(read)
+	if err != nil {
+		return fmt.Errorf("component %s: reaction: %w", c.name, err)
+	}
+	c.react.run(instance, v)
 	return nil
 }
 
@@ -528,6 +560,41 @@ func Derived[In, Out any](port string, builtin Out, help string, fn func(In) (Ou
 		port: Port{Port: port, Type: reflect.TypeFor[Out](), Builtin: builtin, Help: help, Derived: true},
 		d: &derivation{in: in, run: func(v reflect.Value) (any, error) {
 			return fn(v.Interface().(In))
+		}},
+		err: err,
+	}
+}
+
+type reactsPart struct {
+	r   *reaction
+	err error
+}
+
+func (p reactsPart) declare(c *Component) {
+	if p.err != nil {
+		c.fail("reaction: %v", p.err)
+		return
+	}
+	if c.react != nil {
+		c.fail("component %s declares two reactions", c.name)
+	}
+	c.addInputs(p.r.in)
+	c.react = p.r
+}
+
+// Reacts declares that an I/O component runs fn when a name its input struct
+// In reads changes, as a derivation runs for its inputs; it is how a component
+// that acts on time runs: it reads the clock's tick or second
+// (components/clock) and keeps its own interval with a clock.Relay, so no
+// component keeps a timer of its own. The index calls fn after the commit
+// that changed the name, outside its lock, in the committer's goroutine, with
+// the instance's name and its inputs as they stand: fn returns quickly and
+// starts long work on its own.
+func Reacts[In any](fn func(instance string, in In)) Part {
+	in, err := inputsOf(reflect.TypeFor[In]())
+	return reactsPart{
+		r: &reaction{in: in, run: func(instance string, v reflect.Value) {
+			fn(instance, v.Interface().(In))
 		}},
 		err: err,
 	}

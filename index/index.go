@@ -334,7 +334,8 @@ func (ix *Index) Subscribe(name string, fn func(Value)) (cancel func(), err erro
 }
 
 // apply commits an instance's writes, runs every derivation that reads what
-// changed, and then tells the subscribers of each changed name.
+// changed, and then tells the subscribers of each changed name and runs the
+// reaction of each instance that reads one.
 func (ix *Index) apply(in *instance, writes []Write) error {
 	if len(writes) == 0 {
 		return nil
@@ -361,9 +362,13 @@ func (ix *Index) apply(in *instance, writes []Write) error {
 			pushes = append(pushes, push{ix.subs[name][id], v})
 		}
 	}
+	reacts := ix.reactions(changed)
 	ix.mu.Unlock()
 	for _, p := range pushes {
 		p.fn(p.v)
+	}
+	for _, r := range reacts {
+		_ = r.in.comp.React(r.in.name, r.read)
 	}
 	if onRun != nil {
 		for _, inst := range runs {
@@ -371,6 +376,45 @@ func (ix *Index) apply(in *instance, writes []Write) error {
 		}
 	}
 	return err
+}
+
+// pendingReaction is one instance's reaction a commit's change runs, with its
+// inputs as the commit left them.
+type pendingReaction struct {
+	in   *instance
+	read Reader
+}
+
+// reactions answers, in the instances' order, the reaction of each switched-on
+// Go instance that reads a changed name: a plain name it reads, or any key of
+// a family it reads. A declared component declares none.
+func (ix *Index) reactions(changed map[string]bool) []pendingReaction {
+	var out []pendingReaction
+	for _, in := range ix.order {
+		if !in.enabled || in.comp.react == nil {
+			continue
+		}
+		for _, p := range in.comp.Reaction() {
+			if name := in.in[p]; name != "" && reads(name, changed) {
+				out = append(out, pendingReaction{in: in, read: in.reader(ix.snap, "")})
+				break
+			}
+		}
+	}
+	return out
+}
+
+// reads says whether a change moved name, or a key of the family name.
+func reads(name string, changed map[string]bool) bool {
+	if changed[name] {
+		return true
+	}
+	for c := range changed {
+		if _, ok := keyIn(name, c); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // commit makes the next snapshot with the writes in it, and marks each name whose value changed.
