@@ -208,12 +208,10 @@ func days(d time.Duration) string {
 type Hot struct {
 	// Name is the hot test's name, which each recording names.
 	Name string
-	// Module is the I/O module: its component, its expectation file with its
-	// claims, and the setup of each given, which prepares what it reaches.
+	// Module is the I/O module as it reaches the real service: its
+	// component, its expectation file with its claims, its Start against the
+	// real service, and the setup of each given there.
 	Module Module
-	// Reach sets each fresh fake up to reach the service, its config set
-	// and the component started, before the setup of the expectation's given.
-	Reach Setup
 	// Ask makes a reader's ask the one the service is asked, and Answer
 	// makes the service's answer, as JSON reads it, the one the reader is
 	// answered: where a reader names a placeholder, such as an owner, that
@@ -223,15 +221,12 @@ type Hot struct {
 	Now func() time.Time
 }
 
-// reach is how a claimer reaches what it meets an expectation against: as
-// Hot sets it, or nothing for a module's own fake.
-type reach struct {
-	setup       Setup
-	ask, answer func(any) any
-}
+// reach is how a claimer's asks and answers are made the service's and the
+// reader's: as Hot sets them, or left as they are.
+type reach struct{ ask, answer func(any) any }
 
 // Meet holds the module to every expectation in pool on the names it claims,
-// as Module.Meet does, through Reach, Ask and Answer, and answers the
+// as Module.Meet does, through Ask and Answer, and answers the
 // recording of each one it met. It answers each one it does not meet.
 func (h Hot) Meet(pool Pool) ([]Recording, error) {
 	x, err := h.Module.read()
@@ -242,7 +237,7 @@ func (h Hot) Meet(pool Pool) ([]Recording, error) {
 	if now == nil {
 		now = time.Now
 	}
-	r := reach{setup: h.Reach, ask: h.Ask, answer: h.Answer}
+	r := reach{ask: h.Ask, answer: h.Answer}
 	var recs []Recording
 	var errs []error
 	for _, cl := range x.Claims {

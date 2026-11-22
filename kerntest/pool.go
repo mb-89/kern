@@ -44,6 +44,15 @@ type Module struct {
 	// File is its expectation file; "" where it expects and claims nothing.
 	File  string
 	Given map[string]Setup
+	// Start, where set, sets each fresh fake up to reach what the module
+	// reaches, before the setup of the expectation's given: an I/O module's
+	// config set and the component started (Fake.Start), against its fake
+	// service in its tests and the real one in its hot test.
+	Start Setup
+	// Fresh, where set, makes the component each expectation is met by,
+	// one of its own each time: for a component whose state lives in it,
+	// such as an I/O module that starts once. Component is its declaration.
+	Fresh func() *index.Component
 }
 
 func (m Module) read() (Expectations, error) {
@@ -90,13 +99,17 @@ func (m Module) meet(cl Claim, e Expectation) error {
 // what r sets up, and answers what met it, as JSON reads it: the value read
 // or the answer given, after r's answer; nil where it met a refusal.
 func (m Module) answer(cl Claim, e Expectation, r reach) (any, error) {
-	f, err := New(m.Component)
+	c := m.Component
+	if m.Fresh != nil {
+		c = m.Fresh()
+	}
+	f, err := New(c)
 	if err != nil {
 		return nil, err
 	}
-	if r.setup != nil {
-		if err := r.setup(f); err != nil {
-			return nil, fmt.Errorf("reaching the service: %w", err)
+	if m.Start != nil {
+		if err := m.Start(f); err != nil {
+			return nil, fmt.Errorf("starting it: %w", err)
 		}
 	}
 	if e.Given != "" {

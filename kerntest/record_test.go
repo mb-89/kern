@@ -288,10 +288,10 @@ answer = { repo = "owner/demo", title = "a title", labels = [{ name = "a label" 
 	}
 	hot := kerntest.Hot{Name: "service", Module: m, Now: at(recorded),
 		Ask: swap("owner", "alice"), Answer: swap("alice", "owner")}
-	if _, err := hot.Meet(pool); err == nil || !strings.Contains(err.Error(), "reaching") && !strings.Contains(err.Error(), "not started") {
+	if _, err := hot.Meet(pool); err == nil || !strings.Contains(err.Error(), "its verb issue refuses: not started") {
 		t.Fatalf("a service never started met the expectation: %v", err)
 	}
-	hot.Reach = func(f *kerntest.Fake) error {
+	hot.Module.Start = func(f *kerntest.Fake) error {
 		if err := f.Config("world", "the world"); err != nil {
 			return err
 		}
@@ -303,6 +303,7 @@ answer = { repo = "owner/demo", title = "a title", labels = [{ name = "a label" 
 		}
 		return nil
 	}
+	hot.Module.Fresh = service
 	recs, err := hot.Meet(pool)
 	if err != nil {
 		t.Fatal(err)
