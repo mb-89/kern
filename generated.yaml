@@ -20,3 +20,9 @@ generators:
     outputs:
       - kerntest/testdata/names-se-or-host.txt
     held_by: kerntest/moveout_test.go
+  - generator: se_workflows.py write
+    source: SE's RUNME.sh and RUNME.ps1 at the commit each marker names
+    outputs:
+      - template/RUNME.sh
+      - template/RUNME.ps1
+    unchecked: "SE's se_workflows.py --root template check compares them, but the SE kern's se.lock pins predates the copies it writes; once the pin moves past them, CI can run it"

@@ -30,7 +30,7 @@ delete `app` (or `app.exe`) and run RUNME again.
 | `.github/workflows/check.yml` | CI: kern's battery, through the copy beside it |
 | `.github/workflows/kern-battery.yml` | the battery's copy `se new app` writes at kern's pin (SE's README "Workflows") |
 | `AGENTS.md` | the agent guide |
-| `RUNME.sh`, `RUNME.ps1` | the generic installer every tool has, the same as SE's: installs what `RUNME.conf` declares, then runs the tool |
+| `RUNME.sh`, `RUNME.ps1` | the generic installer every tool has, the same as SE's: installs what `RUNME.conf` declares, then runs the tool; generated files, which SE's `se_workflows.py write` writes with the marker that names SE's file and its commit |
 | `RUNME.conf` | this application's declaration: what it needs, how each is installed, and its run command |
 
 ## The pin

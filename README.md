@@ -483,7 +483,8 @@ Every file a program writes says so, naming its generator and its source (SE's g
 
 kern's own generators are declared in its `generated.yaml`: the MCP door's golden answers
 (`door_test.go -golden`), the hot tests' recordings (`kerntest Hot.Record`) and the move-out list
-(`moveout_test.go -update`). `lint/kern_test.go` holds kern's tree to the rule, so `go test ./...`
+(`moveout_test.go -update`), and the template's `RUNME.sh` and `RUNME.ps1`, SE's files as SE's
+`se_workflows.py write` writes them. `lint/kern_test.go` holds kern's tree to the rule, so `go test ./...`
 fails where a generated file goes unmarked or undeclared; SE's `generated.py check` finds the same.
 
 ### In VS Code
