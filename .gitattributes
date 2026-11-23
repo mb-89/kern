@@ -1,0 +1,6 @@
+# Generated files in formats without comments, marked here instead of in a first line (SE's
+# guidance note generated-files-are-marked; generated.yaml declares each generator's outputs).
+/mcp/testdata/door.json linguist-generated generated-by=door_test.go:-golden
+/mcp/testdata/answers.json linguist-generated generated-by=door_test.go:-golden
+*.recorded.json linguist-generated generated-by=kerntest:Hot.Record
+/kerntest/testdata/names-se-or-host.txt linguist-generated generated-by=moveout_test.go:-update

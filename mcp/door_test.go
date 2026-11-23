@@ -673,8 +673,10 @@ func TestAToolIsNamedInSnakeCase(t *testing.T) {
 	}
 }
 
-// golden rewrites testdata/door.json from what the door answers now.
-var golden = flag.Bool("golden", false, "rewrite testdata/door.json from the door's answers")
+// golden rewrites testdata/door.json and testdata/answers.json from what the
+// door answers now. Both are generated files in a format without comments, so
+// kern's .gitattributes marks them and generated.yaml declares them.
+var golden = flag.Bool("golden", false, "rewrite testdata/door.json and testdata/answers.json from the door's answers")
 
 // The door's tools and one answer are its public face: the tools tools/list
 // names and a call of desk answer, byte for byte as JSON, what

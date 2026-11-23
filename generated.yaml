@@ -1,0 +1,22 @@
+# Every generator of kern, the source it reads and the tracked paths it writes, and how a fresh run
+# is compared (`check`, `held_by` or `unchecked`). kern's checker (package lint, its rule
+# generated) and SE's scripts/generated.py read it; SE's guidance note generated-files-are-marked
+# owns the rule. A program that writes a tracked file is a generator and is declared here, with the
+# marker it writes, or, in a format without comments, its line in .gitattributes.
+generators:
+  - generator: door_test.go -golden
+    source: the MCP door's answers
+    outputs:
+      - mcp/testdata/door.json
+      - mcp/testdata/answers.json
+    held_by: mcp/door_test.go
+  - generator: kerntest Hot.Record
+    source: each expectation file met against its real service
+    outputs:
+      - "**/*.recorded.json"
+    held_by: components/github/hot_test.go
+  - generator: moveout_test.go -update
+    source: kerntest/testdata/names-patterns.txt over kern's tree
+    outputs:
+      - kerntest/testdata/names-se-or-host.txt
+    held_by: kerntest/moveout_test.go
