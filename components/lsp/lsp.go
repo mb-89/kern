@@ -29,7 +29,7 @@ const Command = "lsp lint"
 
 // The config keys' built-in values.
 const (
-	// Templates is the folder of the templates, the GitHub component's own.
+	// Templates is the folder of the templates the checker reads.
 	Templates = ".se/templates"
 	// NameLength is the most characters a file's name holds.
 	NameLength = 64

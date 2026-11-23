@@ -2,10 +2,7 @@ package github_test
 
 import (
 	"context"
-	"encoding/json"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,57 +14,17 @@ import (
 	"kern/mcp"
 )
 
-// report is a template as an application's engine generates it: its fields'
-// shapes in order and their JSON Schema, with the marker its body opens with.
-const report = `{
-  "form": "report",
-  "says": "A report of one finding.",
-  "markers": ["<!-- report -->"],
-  "actions": ["issue.create"],
-  "fields": {"title": "", "situation": "", "requirements": [], "kind": ""},
-  "field_shape": {
-    "title": {"kind": "line", "required": true, "source": "title"},
-    "situation": {"kind": "text", "heading": "Situation", "required": true, "max_words": 20},
-    "requirements": {"kind": "list", "heading": "Requirements", "required": true, "numbered": true},
-    "kind": {"kind": "choice", "heading": "Kind", "choices": ["standard", "patch"]}
-  },
-  "schema": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "type": "object",
-    "properties": {
-      "title": {"type": "string", "description": "The name."},
-      "situation": {"type": "string", "description": "What is true today."},
-      "requirements": {"type": "array", "items": {"type": "string"}, "description": "What it must do."},
-      "kind": {"type": "string", "enum": ["standard", "patch"], "description": "Its kind."}
-    },
-    "required": ["title", "situation", "requirements"],
-    "additionalProperties": false
-  }
-}`
-
-// templates writes the templates into a folder of their own and answers it.
-func templates(t *testing.T, files map[string]string) string {
-	t.Helper()
-	dir := t.TempDir()
-	for name, text := range files {
-		if err := os.WriteFile(filepath.Join(dir, name+".json"), []byte(text), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return dir
-}
-
 // door serves the MCP door against the real core, which carries g, and
 // answers the SDK's own client connected to it.
-func door(t *testing.T, g *github.GitHub, w index.Wiring) *sdk.ClientSession {
+func door(t *testing.T, w index.Wiring, comps ...*index.Component) *sdk.ClientSession {
 	t.Helper()
-	c, err := host.Serve(host.Options{Root: t.TempDir(), Wiring: w, Components: []*index.Component{g.Component}})
+	c, err := host.Serve(host.Options{Root: t.TempDir(), Wiring: w, Components: comps})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { c.Stop("the case ends"); <-c.Ended() })
 	s, _ := c.Standing()
-	catalog, err := index.Collect(w, g.Component)
+	catalog, err := index.Collect(w, comps...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,26 +61,31 @@ func callText(r *sdk.CallToolResult) string {
 
 // The acceptance of the door's writing tools: through the door and the real
 // core, the GitHub component's writing tool files an issue from a filled
-// template against the fake REST server, and the tool list marks the tool as
-// writing. A fill the template refuses, and free text, reach GitHub not at all.
+// template the application's template component accepts, against the fake
+// REST server, and the tool list marks the tool as writing. A value the
+// template component refuses, and free text, reach GitHub not at all.
 func TestTheDoorFilesAnIssueFromAFilledTemplate(t *testing.T) {
 	t.Parallel()
 	f, srv := newFake(t)
 	f.created["/repos/alice/demo/issues"] = `{"number": 12, "html_url": "https://github.com/alice/demo/issues/12", "title": "door-files"}`
-	dir := templates(t, map[string]string{"report": report})
 	g := github.New(github.Options{Clock: &clock{now: nine}, Token: token(""), Cloud: notCloud})
+	accept := &acceptor{}
 	w, err := index.ParseWiring([]byte(`
 [instances.github]
 component = "github"
-config = { backend = "token", api = "` + srv.URL + `", templates = '` + filepath.ToSlash(dir) + `' }
+config = { backend = "token", api = "` + srv.URL + `" }
+
+[instances.template]
+component = "template"
 
 [wires]
 "github.second" = "built-in"
+"github.template-accept" = "template.accept"
 `))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cs := door(t, g, w)
+	cs := door(t, w, g.Component, accept.component())
 	ctx := context.Background()
 
 	listed, err := cs.ListTools(ctx, &sdk.ListToolsParams{})
@@ -158,48 +120,26 @@ config = { backend = "token", api = "` + srv.URL + `", templates = '` + filepath
 		}
 		return r
 	}
-	r := call("--repo", "alice/demo", "--template", "report", "--label", "work",
-		"--fields", `{"title": "door-files", "situation": "The door files.", "requirements": ["File it.", "Comment on it."], "kind": "patch"}`)
+	r := call("--repo", "alice/demo", "--label", "work", "--filled", jsonOf(t, fillOf("report", "door-files", odd)))
 	if r.IsError || callText(r) != "filed alice/demo#12: https://github.com/alice/demo/issues/12" {
 		t.Fatalf("github_write answers %q (error %v), and wants issue 12 filed", callText(r), r.IsError)
 	}
-	f.mu.Lock()
-	posted := append([]string{}, f.posted...)
-	f.mu.Unlock()
-	var sent struct {
-		Title, Body string
-		Labels      []string
-	}
-	if len(posted) == 1 {
-		path, body, _ := strings.Cut(posted[0], " ")
-		if err := json.Unmarshal([]byte(body), &sent); err != nil || path != "/repos/alice/demo/issues" {
-			t.Fatalf("GitHub was sent %q (%v), and wants the issue at /repos/alice/demo/issues", posted[0], err)
-		}
-	}
-	body := "<!-- report -->\n\n## Situation\n\nThe door files.\n\n## Requirements\n\n1. File it.\n2. Comment on it.\n\n## Kind\n\npatch\n"
-	if len(posted) != 1 || sent.Title != "door-files" || sent.Body != body || strings.Join(sent.Labels, ",") != "work" {
-		t.Fatalf("GitHub was sent %q, and wants the one issue the template renders, titled door-files, labelled work, its body:\n%s", posted, body)
+	paths, sent := posts(t, f)
+	if len(sent) != 1 || paths[0] != "/repos/alice/demo/issues" || sent[0]["title"] != "door-files" || sent[0]["body"] != odd || jsonOf(t, sent[0]["labels"]) != `["work"]` {
+		t.Fatalf("GitHub was sent %v %v, and wants the one issue the template component accepted, titled door-files, labelled work, its document byte for byte:\n%q", paths, sent, odd)
 	}
 
-	r = call("--repo", "alice/demo", "--template", "report", "--fields", `{"title": "door-files", "requirements": [], "kind": "big", "body": "free text"}`)
-	text := callText(r)
-	for _, finding := range []string{"template report refuses the fill, and nothing reached GitHub", "fields.body is no field of the template",
-		"fields.kind is big, none of [standard patch]", "field situation is required: What is true today.", "field requirements is required: What it must do."} {
-		if !r.IsError || !strings.Contains(text, finding) {
-			t.Fatalf("a refused fill answers %q (error %v), and wants the finding %q", text, r.IsError, finding)
-		}
+	r = call("--repo", "alice/demo", "--filled", `"free text"`)
+	if text := callText(r); !r.IsError || !strings.Contains(text, "github issue-create takes a filled template, not free text: fill template report") || !strings.Contains(text, "nothing reached GitHub") {
+		t.Fatalf("free text as the filled value answers %q (error %v), and wants accept's refusal", text, r.IsError)
 	}
-	r = call("--repo", "alice/demo", "--template", "report", "--body", "free text")
+	r = call("--repo", "alice/demo", "--body", "free text")
 	if !r.IsError || !strings.Contains(callText(r), "-body") {
 		t.Fatalf("free text answers %q (error %v), and wants it refused", callText(r), r.IsError)
-	}
-	r = call("--repo", "alice/demo", "--template", "absent", "--fields", `{}`)
-	if !r.IsError || !strings.Contains(callText(r), "no template absent") {
-		t.Fatalf("an absent template answers %q (error %v), and wants it named", callText(r), r.IsError)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.posted) != 1 {
-		t.Fatalf("GitHub was sent %q, and wants nothing after the one issue: a refused fill reaches it not at all", f.posted)
+		t.Fatalf("GitHub was sent %q, and wants nothing after the one issue: a refused value reaches it not at all", f.posted)
 	}
 }

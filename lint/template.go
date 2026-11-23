@@ -85,7 +85,7 @@ type section struct {
 }
 
 // conform holds a Markdown file to the template it was rendered from, as
-// form.Template.Render writes one: each heading of the template's level is a
+// the template engine renders one: each heading of the template's level is a
 // field's, in the template's order, once; each field's value, read back from
 // the lines under its heading, meets the field's shape
 // (form.Template.FieldFindings) and the field's schema (form.Validate); and
@@ -233,8 +233,8 @@ var task = regexp.MustCompile(`^\s*[-*+]\s+\[([ xX])\]\s+(.*)$`)
 var comment = regexp.MustCompile(`^\s*<!--.*-->\s*$`)
 
 // value reads a field's value back from the lines under its heading, as
-// form's Render writes each kind: text as it stands, a list as its items, a
-// checklist as {text, done}, code as the fence's content.
+// the template engine renders each kind: text as it stands, a list as its
+// items, a checklist as {text, done}, code as the fence's content.
 func value(fl form.TemplateField, body []string) any {
 	var kept []string
 	for _, l := range body {
