@@ -107,7 +107,7 @@ func Open(args []string) (map[string]string, error) {
 
 // Component is the lsp component a binary carries; importing this package
 // registers it, and only a wiring's enabled instance runs it.
-var Component = index.Declare(Name, "Checks the managed files over the warm model: each file's template or schema, links that reach nothing, and names over their caps (package lint).",
+var Component = index.Declare(Name, "Checks the managed files over the warm model: each file's template or schema, links that reach nothing, names over their caps, and generated files marked and declared (package lint).",
 	index.Config("templates", Templates, "The folder of the templates, <name>.json, relative to the checkout's root: only those the model holds are read."),
 	index.Config("name-length", NameLength, "The most characters a managed file's name holds; 0 sets no cap."),
 	index.Config("name-words", NameWords, "The most words a managed file's name holds before its first dot, split at dashes, underscores and spaces; 0 sets no cap."),
@@ -118,12 +118,12 @@ var Component = index.Declare(Name, "Checks the managed files over the warm mode
 		Name:    Command,
 		Usage:   Command + " [OPEN]",
 		Summary: "Check the managed files.",
-		Help: "Answers every finding over the warm model as JSON, {\"findings\": [{\"path\", \"line\", \"col\", \"end_col\", \"rule\", \"message\"}], \"checked\"}. " +
+		Help: "Answers every finding over the warm model as JSON, {\"findings\": [{\"path\", \"line\", \"col\", \"end_col\", \"rule\", \"message\", \"severity\"}], \"checked\"}; severity \"notice\" fails nothing. " +
 			"OPEN, where given, is a JSON object of path to text: the editor's open buffers, each in place of the file at its path.",
 		Group:    "Checks",
 		Class:    index.Interactive,
 		ReadOnly: true,
-		MCP:      "Use to find what is wrong with the managed files (a template or schema they break, a link that reaches nothing, a name over its cap) before a test or a reviewer does: the editor's language server shows the same findings.",
+		MCP:      "Use to find what is wrong with the managed files (a template or schema they break, a link that reaches nothing, a name over its cap, a generated file unmarked or undeclared) before a test or a reviewer does: the editor's language server shows the same findings.",
 	}, func(in input, args []string) (index.Result, error) {
 		open, err := Open(args)
 		if err != nil {

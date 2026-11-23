@@ -3,7 +3,8 @@
 // (components/lsp/lsptest) all ask Check, so a rule is written once and
 // reaches all three, and what the editor shows is what the tests find. Its
 // rules are each managed file's template or schema, links that reach
-// nothing, and names over their caps (README.md "Language server").
+// nothing, names over their caps, and generated files marked and declared
+// (README.md "Language server").
 //
 // Check is pure: it reads the files it is handed and nothing else, so its
 // callers hand it the warm model (components/files), with the editor's open
@@ -33,7 +34,12 @@ const (
 )
 
 // Rules are the rules Check runs, in the order a finding's rule sorts.
-var Rules = []string{RuleTemplate, RuleSchema, RuleLink, RuleName}
+var Rules = []string{RuleTemplate, RuleSchema, RuleLink, RuleName, RuleGenerated}
+
+// SeverityNotice is a finding that tells, such as which program writes a
+// generated file, and fails nothing; a finding without a severity is an
+// error, which `lint` and the tests fail on.
+const SeverityNotice = "notice"
 
 // File is one file the checker reads: its path relative to the checkout's
 // root, slash-separated, and its content where Held. A file held by its hash
@@ -77,11 +83,33 @@ type Finding struct {
 	Rule string `json:"rule"`
 	// Message says what is wrong and, where it can, the remedy.
 	Message string `json:"message"`
+	// Severity is SeverityNotice for a finding that fails nothing; "" is an error.
+	Severity string `json:"severity,omitempty"`
 }
 
-// String is the finding as `lint` prints it: path:line:col: rule: message.
+// Notice says whether the finding only tells, failing nothing.
+func (f Finding) Notice() bool { return f.Severity == SeverityNotice }
+
+// Errors answers the findings that are errors, those `lint` and the tests
+// fail on, in their order.
+func Errors(found []Finding) []Finding {
+	var errs []Finding
+	for _, f := range found {
+		if !f.Notice() {
+			errs = append(errs, f)
+		}
+	}
+	return errs
+}
+
+// String is the finding as `lint` prints it: path:line:col: rule: message,
+// a notice's rule followed by " notice".
 func (f Finding) String() string {
-	return fmt.Sprintf("%s:%d:%d: %s: %s", f.Path, f.Line, f.Col, f.Rule, f.Message)
+	rule := f.Rule
+	if f.Notice() {
+		rule += " " + SeverityNotice
+	}
+	return fmt.Sprintf("%s:%d:%d: %s: %s", f.Path, f.Line, f.Col, rule, f.Message)
 }
 
 // set is what one check reads: the files by path, and the config.
@@ -90,10 +118,11 @@ type set struct {
 	paths   []string // sorted
 	config  Config
 	folders []string
+	whole   bool // a managed folder is the checkout's root: every file is handed
 }
 
 // Check answers every finding the rules make of files, sorted by path, line,
-// column, rule and message. A file outside every managed folder is checked
+// column, rule, severity (errors first) and message. A file outside every managed folder is checked
 // like any other: the caller hands what it manages.
 func Check(files []File, c Config) []Finding {
 	s := &set{files: map[string]File{}, config: c}
@@ -105,11 +134,14 @@ func Check(files []File, c Config) []Finding {
 	for _, folder := range c.Folders {
 		if clean := path.Clean(folder); clean != "." {
 			s.folders = append(s.folders, clean)
+		} else {
+			s.whole = true
 		}
 	}
 	var found []Finding
 	templates, tf := s.templates()
 	found = append(found, tf...)
+	found = append(found, s.generated()...)
 	for _, p := range s.paths {
 		f := s.files[p]
 		found = append(found, s.names(f)...)
@@ -141,6 +173,8 @@ func Sort(found []Finding) {
 			return a.Col < b.Col
 		case a.Rule != b.Rule:
 			return a.Rule < b.Rule
+		case a.Severity != b.Severity:
+			return a.Severity < b.Severity // an error before a notice
 		}
 		return a.Message < b.Message
 	})

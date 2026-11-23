@@ -350,17 +350,28 @@ func (s *server) publish(ctx context.Context) {
 	}
 }
 
+// The protocol's severities the server publishes.
+const (
+	SeverityError       = 1
+	SeverityInformation = 3
+)
+
 // Diagnostic is a finding as the protocol carries it: its range on its line
-// (to the line's end where it names no end), an error, the rule as its code.
+// (to the line's end where it names no end), an error or, for a notice
+// (lint.SeverityNotice), information, the rule as its code.
 func Diagnostic(f lint.Finding) map[string]any {
 	start := map[string]int{"line": f.Line - 1, "character": f.Col - 1}
 	end := map[string]int{"line": f.Line, "character": 0}
+	severity := SeverityError
+	if f.Notice() {
+		severity = SeverityInformation
+	}
 	if f.EndCol > 0 {
 		end = map[string]int{"line": f.Line - 1, "character": f.EndCol - 1}
 	}
 	return map[string]any{
 		"range":    map[string]any{"start": start, "end": end},
-		"severity": 1,
+		"severity": severity,
 		"source":   Source,
 		"code":     f.Rule,
 		"message":  f.Message,

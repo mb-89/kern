@@ -19,7 +19,8 @@ import (
 )
 
 // Findings answers every finding `lsp lint` answers in the checkout at
-// root: its wiring.toml's instances of the files and the lsp components,
+// root, notices among them, so a test fails on lint.Errors of them: its
+// wiring.toml's instances of the files and the lsp components,
 // with their config and wires, run with the model read from the disk. It
 // writes nothing it leaves: each managed folder's start cookie is heard and
 // removed before it returns.
