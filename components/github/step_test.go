@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -241,6 +243,100 @@ func TestTheHookOfAnAnswerTellsTheNextStep(t *testing.T) {
 	}
 	_ = ix.Hear(github.PostToolUse, toolUse("mcp__github__issue_write", map[string]any{"owner": "alice", "repo": "demo", "issue_number": 7}, `{}`))
 	<-done
+}
+
+// heldClock is the case's clock with two holds on it: hold makes its next
+// Now wait until release, as the next step reads the time before it is
+// asked; a wait of tellWait says so on waiting, as the tell's wait begins.
+type heldClock struct {
+	clock
+	mu       sync.Mutex
+	gate     chan struct{} // the next Now waits for it, once
+	held     chan struct{} // closed once that Now waits
+	tellWait time.Duration
+	waiting  chan struct{} // closed once a wait of tellWait begins
+}
+
+func (c *heldClock) hold() (held chan struct{}, release func()) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	gate := make(chan struct{})
+	c.gate, c.held = gate, make(chan struct{})
+	return c.held, func() { close(gate) }
+}
+
+func (c *heldClock) Now() time.Time {
+	c.mu.Lock()
+	gate, held := c.gate, c.held
+	c.gate = nil
+	c.mu.Unlock()
+	if gate != nil {
+		close(held)
+		<-gate
+	}
+	return c.clock.Now()
+}
+
+func (c *heldClock) After(d time.Duration) <-chan time.Time {
+	ch := c.clock.After(d)
+	if d == c.tellWait {
+		c.mu.Lock()
+		select {
+		case <-c.waiting:
+		default:
+			close(c.waiting)
+		}
+		c.mu.Unlock()
+	}
+	return ch
+}
+
+// The tell of an answer waits for the ask of the next step, never for the
+// signal of an ask before it: here the answer is heard while its own step is
+// still being asked, inside the outbox commit that asks it, so that ask's
+// signal comes after the answer; the next step is held until the tell waits.
+func TestTheTellOfAnAnswerWaitsForTheNextAskNotAnEarlierOne(t *testing.T) {
+	t.Parallel()
+	clk := &heldClock{clock: clock{now: nine}, tellWait: 20 * time.Second, waiting: make(chan struct{})}
+	g, ix := startedSteps(t, github.Options{Clock: clk, Token: noToken}, `tell-wait = "20s"`)
+	in := map[string]any{"owner": "alice", "repo": "demo", "issue_number": float64(7), "body": "x", "then": "issue_write"}
+	answer := toolUse("mcp__github__add_issue_comment", in, `{}`)
+	var asked atomic.Bool
+	heard := make(chan error, 1)
+	var held chan struct{}
+	var release func()
+	cancel, err := ix.Subscribe("github/outbox/"+github.StepKey(github.StepAsk{Tool: "add_issue_comment", Input: in}), func(index.Value) {
+		if asked.CompareAndSwap(false, true) { // the step's ask, not its drop
+			err := ix.Hear(github.PostToolUse, answer)
+			held, release = clk.hold() // after the answer, which reads the time
+			heard <- err
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cancel)
+	done := call(ix, "add_issue_comment", `{"owner": "alice", "repo": "demo", "issue_number": 7, "body": "x", "then": "issue_write"}`)
+	if err := <-heard; err != nil {
+		t.Fatal(err)
+	}
+	<-held // the step has answered, its ask has signalled, and the next step waits to be asked
+	told := make(chan []string, 1)
+	go func() { told <- ix.Tell(github.PostToolUse, answer) }()
+	<-clk.waiting
+	release()
+	if said := <-told; len(said) != 1 || !strings.Contains(said[0], "1. issue_write") || strings.Contains(said[0], "add_issue_comment") {
+		t.Fatalf("the answer's hook tells %q, and wants the next step, asked after the answer", said)
+	}
+	if err := ix.Hear(github.PostToolUse, toolUse("mcp__github__issue_write", map[string]any{"owner": "alice", "repo": "demo", "issue_number": 7}, `{}`)); err != nil {
+		t.Fatal(err)
+	}
+	if c := <-done; c.err != nil {
+		t.Fatal(c.err)
+	}
+	if g.Outbox() != "" {
+		t.Fatalf("answered steps stand in the outbox: %q", g.Outbox())
+	}
 }
 
 // Through the real core and the command line: the hook of a tool answer

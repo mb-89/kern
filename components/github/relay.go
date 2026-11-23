@@ -201,9 +201,9 @@ func (g *GitHub) hear(instance, event string, payload []byte) error {
 	if err := json.Unmarshal(payload, &use); err != nil || !strings.HasPrefix(use.Tool, "mcp__") {
 		return nil // not a tool use the relay reads
 	}
-	if g.answerStep(use) {
+	if asks, ok := g.answerStep(use); ok {
 		g.mu.Lock()
-		g.answered[string(payload)] = true
+		g.answered[string(payload)] = asks
 		g.mu.Unlock()
 	} else if line := g.staleStep(use); line != "" {
 		g.mu.Lock()
@@ -444,14 +444,13 @@ func (g *GitHub) step(ctx context.Context, a StepAsk) (StepAnswer, error) {
 		return StepAnswer{}, fmt.Errorf("github step %s: the same call already waits as outbox step %s", a.Tool, key)
 	}
 	g.steps[key] = w
+	g.asks++ // counted where it enters the steps, so no answer to it is heard before its count
+	close(g.nextAsk)
+	g.nextAsk = make(chan struct{})
 	g.mu.Unlock()
 	if err := commit(outboxOut.At(key, Step{Tool: a.Tool, Input: a.Input, Asked: now, Note: a.Note})); err != nil {
 		g.drop(key)
 		return StepAnswer{}, err
-	}
-	select {
-	case g.asked <- struct{}{}:
-	default:
 	}
 	select {
 	case r := <-w.answer:
@@ -478,11 +477,12 @@ func (g *GitHub) drop(key string) {
 }
 
 // answerStep answers the oldest waiting step a tool use matches, by the
-// time it was asked, and says whether one was; a numbered step it answers is
-// kept, so a later answer to it is told apart (staleStep).
-func (g *GitHub) answerStep(use toolUse) bool {
+// time it was asked, and says whether one was, with the steps asked by then,
+// which the answer's tell waits to pass; a numbered step it answers is kept,
+// so a later answer to it is told apart (staleStep).
+func (g *GitHub) answerStep(use toolUse) (uint64, bool) {
 	if !strings.HasPrefix(use.Tool, "mcp__") {
-		return false
+		return 0, false
 	}
 	bare := use.Tool[strings.LastIndex(use.Tool, "__")+2:]
 	g.mu.Lock()
@@ -499,21 +499,18 @@ func (g *GitHub) answerStep(use toolUse) bool {
 			g.done = g.done[len(g.done)-keepAnswered:]
 		}
 	}
+	asks := g.asks // every step asked before this answer, its own among them, is no next step for its tell
 	g.mu.Unlock()
 	if w == nil {
-		return false
+		return 0, false
 	}
 	data, err := stepAnswerOf(use.Response)
-	select { // a step asked before this answer is no next step for its tell
-	case <-g.asked:
-	default:
-	}
 	g.drop(key)
 	if err != nil {
 		err = fmt.Errorf("github step %s: %w", bare, err)
 	}
 	w.answer <- stepResult{StepAnswer{Tool: bare, Input: use.Input, Read: g.o.Clock.Now().UTC(), Data: data}, err}
-	return true
+	return asks, true
 }
 
 // older says whether waiting step s at key k was asked before w at key;
@@ -629,7 +626,9 @@ func stepAnswerOf(raw json.RawMessage) (any, error) {
 // tell answers what the relay waits for, on the events whose hook hands the
 // agent context: every outbox entry, oldest first, as the tool call to run.
 // Where this event's tool answer answered a step, it first waits up to
-// tell-wait for the next step to be asked, so the agent is told that one.
+// tell-wait for the next step to be asked, so the agent is told that one:
+// until the steps asked pass the count its answer saw, never on an ask that
+// came before the answer.
 // Where it answered no waiting step but one already answered, the tell opens
 // with the line that refuses it (staleStep), and tells what waits below.
 func (g *GitHub) tell(_ string, event string, payload []byte) string {
@@ -637,11 +636,11 @@ func (g *GitHub) tell(_ string, event string, payload []byte) string {
 		return ""
 	}
 	g.mu.Lock()
-	answered := g.answered[string(payload)]
+	seen, answered := g.answered[string(payload)]
 	delete(g.answered, string(payload))
 	stale, old := g.stale[string(payload)]
 	delete(g.stale, string(payload))
-	wait := g.tellWait
+	wait, asks, next := g.tellWait, g.asks, g.nextAsk
 	g.mu.Unlock()
 	if old { // an answer to an old step: its one line, then what waits
 		if waits := g.Outbox(); waits != "" {
@@ -649,9 +648,9 @@ func (g *GitHub) tell(_ string, event string, payload []byte) string {
 		}
 		return stale
 	}
-	if answered {
+	if answered && asks <= seen { // next closes at the first ask after seen
 		select {
-		case <-g.asked:
+		case <-next:
 		case <-g.o.Clock.After(wait):
 		}
 	}
