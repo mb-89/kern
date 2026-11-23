@@ -15,6 +15,7 @@ import (
 	"kern/cli"
 	"kern/host"
 	"kern/index"
+	"kern/waiting"
 )
 
 // The long step's limit, shortened (README.md "Tests"): replyDefault replaces
@@ -84,17 +85,13 @@ func TestAStepAnswersAfterALongLocalPhase(t *testing.T) {
 	}()
 	call := regexp.MustCompile(`(?m)^\d+\. (\S+) (\{.*\})$`)
 	var ran []string
-	for {
+	var got answered
+	// Each look answers the steps the hook tells until gap run answers.
+	waiting.Until(t, "gap run's answer", func() bool {
 		select {
-		case got := <-done:
-			if got.err != nil || got.a.Error != "" || !strings.Contains(got.a.Text, "heard list_issues after "+gap+" s") {
-				t.Fatalf("gap run answers %+v (%v) after the steps %q; the step after the long phase wants to reach the hook", got.a, got.err, ran)
-			}
-			if strings.Join(ran, " ") != "issue_read list_issues" {
-				t.Fatalf("the host ran %q, and wants issue_read, then list_issues", ran)
-			}
-			return
-		case <-time.After(10 * time.Millisecond):
+		case got = <-done:
+			return true
+		default:
 		}
 		var told struct {
 			Out struct {
@@ -121,6 +118,13 @@ func TestAStepAnswersAfterALongLocalPhase(t *testing.T) {
 			hookOut(t, root, "PostToolUse", string(payload))
 			ran = append(ran, m[1])
 		}
+		return false
+	})
+	if got.err != nil || got.a.Error != "" || !strings.Contains(got.a.Text, "heard list_issues after "+gap+" s") {
+		t.Fatalf("gap run answers %+v (%v) after the steps %q; the step after the long phase wants to reach the hook", got.a, got.err, ran)
+	}
+	if strings.Join(ran, " ") != "issue_read list_issues" {
+		t.Fatalf("the host ran %q, and wants issue_read, then list_issues", ran)
 	}
 }
 

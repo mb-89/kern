@@ -17,6 +17,7 @@ import (
 	"kern/bus"
 	"kern/host"
 	"kern/index"
+	"kern/waiting"
 )
 
 // PythonEnv names the Python the real leg runs tally's process with; where
@@ -233,7 +234,7 @@ func (c *core) call(t *testing.T, run []string, say func(string)) (string, error
 		return "", err
 	}
 	var streamed []string
-	deadline := time.After(30 * time.Second)
+	deadline := waiting.Fails()
 	for {
 		select {
 		case m := <-heard:
@@ -257,7 +258,7 @@ func (c *core) call(t *testing.T, run []string, say func(string)) (string, error
 			}
 			return a.Text, nil
 		case <-deadline:
-			return "", fmt.Errorf("call.%s answers nothing within 30 s", bus.Token(run[0]))
+			return "", fmt.Errorf("call.%s answers nothing within %v", bus.Token(run[0]), waiting.Bound)
 		}
 	}
 }
@@ -306,17 +307,10 @@ func TestTheRealCoreKeepsTheContractForALateSubscriber(t *testing.T) {
 			t.Parallel()
 			cs.runReal(t, func(c *core) {
 				wantValue := cs.Want.Outputs[cs.Derive].Value
-				deadline := time.Now().Add(20 * time.Second)
-				for {
+				waiting.Until(t, fmt.Sprintf("tally's %s as %s before the subscription", cs.Derive, wantValue), func() bool {
 					v := c.get(t, "tally/"+cs.Derive)
-					if v.Provided && sameJSON(t, v.Value, wantValue) {
-						return
-					}
-					if time.Now().After(deadline) {
-						t.Fatalf("tally never provides %s as %s before the subscription", cs.Derive, wantValue)
-					}
-					time.Sleep(50 * time.Millisecond)
-				}
+					return v.Provided && sameJSON(t, v.Value, wantValue)
+				})
 			})
 		})
 	}
@@ -367,14 +361,14 @@ func (cs contractCase) runReal(t *testing.T, beforeSubscribe func(c *core)) {
 		// The push may come before the subscription (tally pushes on its attach), so
 		// read the name once after subscribing: a value already there ends the wait.
 		wantValue := cs.Want.Outputs[cs.Derive].Value
-		deadline := time.After(20 * time.Second)
+		deadline := waiting.Fails()
 		current := c.get(t, "tally/"+cs.Derive)
-	waiting:
+	pushes:
 		for current.Error != "" || !current.Provided || !sameJSON(t, current.Value, wantValue) {
 			select {
 			case v := <-pushed:
 				if sameJSON(t, v, wantValue) {
-					break waiting
+					break pushes
 				}
 			case <-deadline:
 				t.Fatalf("tally's %s is never pushed as %s", cs.Derive, wantValue)

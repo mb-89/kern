@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"kern/index"
+	"kern/waiting"
 )
 
 // held is a declared component whose one command asks the desk once and
@@ -138,7 +139,7 @@ func TestACallGivenUpTellsItsComponentAndLeavesTheCallBesideIt(t *testing.T) {
 	var g ended
 	select {
 	case g = <-given:
-	case <-time.After(10 * time.Second):
+	case <-waiting.Fails():
 		t.Fatal("the given-up call still waits for its request")
 	}
 	if g.err == nil || !strings.Contains(g.err.Error(), "the call is given up: its caller gave it up") {
@@ -154,7 +155,7 @@ func TestACallGivenUpTellsItsComponentAndLeavesTheCallBesideIt(t *testing.T) {
 		if s.err != nil || s.r.Text != "call 2: yes b" {
 			t.Fatalf("the call beside it answers %+v, %v, and wants its continuation's text", s.r, s.err)
 		}
-	case <-time.After(10 * time.Second):
+	case <-waiting.Fails():
 		t.Fatal("the call beside the given-up one never answers")
 	}
 	if len(remote.stops()) != 1 {
@@ -171,15 +172,9 @@ func TestACallGivenUpTellsItsComponentAndLeavesTheCallBesideIt(t *testing.T) {
 
 func waitSteps(t *testing.T, r *heldRemote, n int) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	waiting.Until(t, fmt.Sprintf("step %d of the component", n), func() bool {
 		r.mu.Lock()
-		got := len(r.steps)
-		r.mu.Unlock()
-		if got >= n {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("the component ran fewer than %d steps", n)
+		defer r.mu.Unlock()
+		return len(r.steps) >= n
+	})
 }

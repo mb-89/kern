@@ -5,10 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"kern/host"
 	"kern/index"
+	"kern/waiting"
 )
 
 // The bare application starts on its own wiring with the components it
@@ -32,7 +32,7 @@ func TestTheCoreStartsOnTheApplicationsWiring(t *testing.T) {
 	core.Stop("test")
 	select {
 	case <-core.Ended():
-	case <-time.After(10 * time.Second):
-		t.Fatal("the core did not end within 10 s of its stop")
+	case <-waiting.Fails():
+		t.Fatal("the core did not end after its stop")
 	}
 }

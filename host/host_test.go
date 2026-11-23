@@ -19,6 +19,7 @@ import (
 	"kern/git/gitfake"
 	"kern/host"
 	"kern/index"
+	"kern/waiting"
 )
 
 // wait is how long a case waits on an event that comes within milliseconds.
@@ -43,9 +44,11 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// placed is the pump's process: it dials the bus as its own user, tries to
-// commit as the gauge, and commits the level 7 once the bus has refused
-// that, or -1 where it let it through; then it beats until the core ends it.
+// placed is the pump's process: it dials the bus as its own user, takes its
+// lease, tries to commit as the gauge, and commits the level 7 once the bus
+// has refused that, or -1 where it let it through; then it waits until the
+// core ends it. It beats no more: the case's clock stands still, so its lease
+// holds until the case moves the clock past the lapse.
 func placed() int {
 	refused, closed := make(chan error, 4), make(chan struct{})
 	nc, err := bus.Dial(os.Getenv(bus.EnvBus), os.Getenv(bus.EnvUser), os.Getenv(bus.EnvToken),
@@ -65,20 +68,14 @@ func placed() int {
 		if errors.Is(err, nats.ErrPermissionViolation) {
 			level = 7
 		}
-	case <-time.After(wait):
+	case <-waiting.Fails():
 	}
 	if _, err := nc.Request(bus.Commit+me, []byte(fmt.Sprintf(`{"writes":[{"port":"level","value":%d}]}`, level)), wait); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	for {
-		select {
-		case <-closed:
-			return 0
-		case <-time.After(host.Beat):
-			_ = nc.Publish(bus.Lease+me, nil)
-		}
-	}
+	<-closed
+	return 0
 }
 
 // clock is a clock the case moves; its waits never fire, so the case runs each check itself.
@@ -96,12 +93,28 @@ func (c *clock) Now() time.Time {
 }
 func (c *clock) After(time.Duration) <-chan time.Time { return make(chan time.Time) }
 
-// beating is the case's clock whose waits are the wall clock's: for a case
-// that shortened the call's beat to milliseconds and hears it beat, while
-// its time stands still, so no lease or idle end comes.
-type beating struct{ *clock }
+// beats is the case's clock whose wait of a call's beat the case fires
+// itself, one beat at a time, while its time stands still, so no lease or
+// idle end comes; every other wait never fires. Each wait of the beat comes
+// to the case on waits as the channel the case fires.
+type beats struct {
+	*clock
+	beat  time.Duration
+	waits chan chan time.Time
+}
 
-func (beating) After(d time.Duration) <-chan time.Time { return time.After(d) }
+func newBeats(beat time.Duration) *beats {
+	return &beats{clock: newClock(), beat: beat, waits: make(chan chan time.Time, 64)}
+}
+
+func (b *beats) After(d time.Duration) <-chan time.Time {
+	if d != b.beat {
+		return make(chan time.Time)
+	}
+	fire := make(chan time.Time, 1)
+	b.waits <- fire
+	return fire
+}
 
 func (c *clock) move(d time.Duration) {
 	c.mu.Lock()
@@ -159,7 +172,7 @@ func ended(t *testing.T, c *host.Core, want string) {
 	t.Helper()
 	select {
 	case <-c.Ended():
-	case <-time.After(wait):
+	case <-waiting.Fails():
 		t.Fatalf("the core runs on, and should end because %s", want)
 	}
 	if !strings.Contains(c.Reason(), want) {
@@ -328,23 +341,21 @@ func TestAStopEndsTheCoreThoughItsAskerStaysOn(t *testing.T) {
 		t.Fatal("the core ended though its asker stays on and its clock stands still")
 	default:
 	}
-	end := time.Now().Add(wait)
-	for moved := false; ; moved = true {
+	moved := false
+	waiting.Until(t, "the core's end once its clock moved past HangUp", func() bool {
 		select {
 		case <-c.Ended():
 			if !moved {
 				t.Fatal("the core ended before its clock moved past HangUp")
 			}
-			ended(t, c, "asked to stop")
-			return
+			return true
 		default:
 		}
-		if !time.Now().Before(end) {
-			t.Fatal("the core runs on though its clock moved past HangUp")
-		}
 		clk.move(hangUp) // the stop's wait reads its end once it begins; each move passes it
-		time.Sleep(time.Millisecond)
-	}
+		moved = true
+		return false
+	})
+	ended(t, c, "asked to stop")
 }
 
 // One core per checkout: a second one in the same root is refused.
@@ -523,7 +534,7 @@ func TestAPlacedInstanceAttachesAndCommitsItsOwnNames(t *testing.T) {
 	} else {
 		select {
 		case <-values:
-		case <-time.After(wait):
+		case <-waiting.Fails():
 			t.Fatal("the placed pump commits nothing")
 		}
 		ask(t, core, bus.Get+"tank.level", nil, &level)
@@ -620,24 +631,32 @@ func TestAHookWithNoCoreFailsOpenAtOnce(t *testing.T) {
 		if !errors.Is(err, host.ErrNotRunning) {
 			t.Fatalf("a hook with no core answers %v, and wants ErrNotRunning", err)
 		}
-	case <-time.After(wait):
-		t.Fatalf("a hook with no core and an hour's wait has not answered after %v: it waits for a core", wait)
+	case <-waiting.Fails():
+		t.Fatalf("a hook with no core and an hour's wait has not answered after %v: it waits for a core", waiting.Bound)
 	}
 }
 
-// looking is a wall clock that counts its reads: the one of the wait's end,
-// then two for each look at a start's claim (each look reads Now once the
-// claim is found, and again for the wait's end), and runs first on the
-// first look.
+// looking is a clock that counts its reads and moves a millisecond on each:
+// the one of the wait's end, then two for each look at a start's claim (each
+// look reads Now once the claim is found, and again for the wait's end), and
+// runs first on the first look. It starts at the wall clock's time, as a
+// claim's age is measured against the claim file's time; its waits never
+// fire. A hook's wait so ends after a count of its reads, never of the wall
+// clock's time.
 type looking struct {
 	mu    sync.Mutex
+	since time.Time
 	looks int
 	first func()
 }
 
 func (l *looking) Now() time.Time {
 	l.mu.Lock()
+	if l.since.IsZero() {
+		l.since = host.Wall{}.Now()
+	}
 	l.looks++
+	now := l.since.Add(time.Duration(l.looks) * time.Millisecond)
 	var first func()
 	if l.looks == 2 { // the first look at the claim
 		first, l.first = l.first, nil
@@ -646,10 +665,10 @@ func (l *looking) Now() time.Time {
 	if first != nil {
 		first()
 	}
-	return time.Now()
+	return now
 }
 
-func (l *looking) After(d time.Duration) <-chan time.Time { return time.After(d) }
+func (l *looking) After(time.Duration) <-chan time.Time { return make(chan time.Time) }
 
 func (l *looking) count() int {
 	l.mu.Lock()
@@ -677,7 +696,7 @@ func TestAHookWaitsForAStartingCoreWithinItsWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	never := &looking{}
-	if _, err := host.Post(never, root, "Stop", nil, 200*time.Millisecond); !errors.Is(err, host.ErrNotRunning) || never.count() < 5 {
+	if _, err := host.Post(never, root, "Stop", nil, 20*time.Millisecond); !errors.Is(err, host.ErrNotRunning) || never.count() < 5 {
 		t.Fatalf("a hook whose core never comes up answers %v after %d reads of its clock, and wants ErrNotRunning once it looked again: 5 reads", err, never.count())
 	}
 	var c *host.Core
@@ -956,6 +975,7 @@ func TestTheHealthListsTheCallsTheCoreRuns(t *testing.T) {
 	// next waits for the subject's first message: a progress line, or a call's answer.
 	next := func(subject string) {
 		t.Helper()
+		fails := waiting.Fails()
 		for {
 			select {
 			case m := <-heard:
@@ -974,7 +994,7 @@ func TestTheHealthListsTheCallsTheCoreRuns(t *testing.T) {
 				if m.Subject == subject {
 					return
 				}
-			case <-time.After(wait):
+			case <-fails:
 				t.Fatalf("nothing on %s", subject)
 			}
 		}

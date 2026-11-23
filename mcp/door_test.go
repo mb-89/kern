@@ -18,6 +18,7 @@ import (
 
 	"kern/host"
 	"kern/index"
+	"kern/waiting"
 )
 
 // fakeCore is the core as a test plays it: it stands once started, after
@@ -271,7 +272,7 @@ func (c *client) hangUp() {
 		if err != nil {
 			c.t.Fatalf("the door ends on EOF with %v, and wants none", err)
 		}
-	case <-time.After(10 * time.Second):
+	case <-waiting.Fails():
 		c.t.Fatal("the door runs on after EOF")
 	}
 }

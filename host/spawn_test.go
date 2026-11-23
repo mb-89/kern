@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"kern/host"
+	"kern/waiting"
 )
 
 // spawnedArg makes this test binary a core that host.Start spawned: it is
@@ -40,14 +41,10 @@ func TestAStopOfACoreItsLiveStarterSpawnedReturnsAtOnce(t *testing.T) {
 	if err != nil || got != host.Spawned {
 		t.Fatalf("the start answers %v, %v, and wants %v", got, err, host.Spawned)
 	}
-	for end := time.Now().Add(wait); ; time.Sleep(10 * time.Millisecond) {
-		if _, err := host.ReadStanding(root); err == nil {
-			break
-		}
-		if time.Now().After(end) {
-			t.Fatalf("the spawned core wrote no standing file within %v", wait)
-		}
-	}
+	waiting.Until(t, "the spawned core's standing file", func() bool {
+		_, err := host.ReadStanding(root)
+		return err == nil
+	})
 	asked := time.Now()
 	pid, err := host.AskStop(host.Wall{}, root)
 	if err != nil {

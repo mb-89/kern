@@ -15,6 +15,7 @@ import (
 	"kern/components/github"
 	"kern/host"
 	"kern/index"
+	"kern/waiting"
 )
 
 // clock is the component's clock; the case moves it. A wait on it ends when
@@ -75,7 +76,34 @@ func (c *clock) move(d time.Duration) {
 type nowClock func() time.Time
 
 func (n nowClock) Now() time.Time                       { return n() }
-func (nowClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
+func (nowClock) After(d time.Duration) <-chan time.Time { return host.Wall{}.After(d) }
+
+// steps answers each step that stands at the outbox name, as the index
+// commits it: the subscription is taken before the case asks, so no step
+// is missed, and the step that already stands comes first.
+func steps(t *testing.T, ix *index.Index, name string) <-chan github.Step {
+	t.Helper()
+	got := make(chan github.Step, 64)
+	cancel, err := ix.Subscribe(name, func(v index.Value) {
+		if v.Provided {
+			select {
+			case got <- v.V.(github.Step):
+			default: // a case reads the few steps it asks; the index never waits on it
+			}
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cancel)
+	if v, _ := ix.Read(name); v.Provided {
+		select {
+		case got <- v.V.(github.Step):
+		default:
+		}
+	}
+	return got
+}
 
 // beat is the clock's second as the case writes it (components/clock), a
 // count that counts up: an I/O component whose one output the wiring binds
@@ -544,16 +572,12 @@ func TestTheRelayAsksOnTheOutboxAndPostToolUseAnswers(t *testing.T) {
 func TestARelayReadWaitsForTheToolAnswer(t *testing.T) {
 	t.Parallel()
 	_, ix := started(t, github.Options{Clock: &clock{now: nine}, Token: noToken}, wiring(t, `relay-wait = "10s"`))
+	asked := steps(t, ix, "github/outbox/check-runs.alice.demo.8")
 	go func() {
-		for {
-			if v, _ := ix.Read("github/outbox/check-runs.alice.demo.8"); v.Provided {
-				_ = ix.Hear(github.PostToolUse, toolUse("mcp__0f1e2d3c__pull_request_read",
-					map[string]any{"method": "get_check_runs", "owner": "alice", "repo": "demo", "pullNumber": 8},
-					`{"total_count": 2, "check_runs": []}`))
-				return
-			}
-			time.Sleep(time.Millisecond)
-		}
+		<-asked
+		_ = ix.Hear(github.PostToolUse, toolUse("mcp__0f1e2d3c__pull_request_read",
+			map[string]any{"method": "get_check_runs", "owner": "alice", "repo": "demo", "pullNumber": 8},
+			`{"total_count": 2, "check_runs": []}`))
 	}()
 	r, err := ix.Call("read", "checks", "alice", "demo", "8")
 	if err != nil || r.Text != "2 check runs, read 2026-11-13T09:00:00Z via relay" {
@@ -573,9 +597,7 @@ func TestARelayReadFailsWhenItsClockPassesItsWait(t *testing.T) {
 		_, err := ix.Call("read", "issue", "alice", "demo", "7")
 		failed <- err
 	}()
-	for clk.pending() == 0 {
-		time.Sleep(time.Millisecond) // the read asks its step and waits at once
-	}
+	waiting.Until(t, "the read's wait on its clock", func() bool { return clk.pending() > 0 })
 	if v, _ := ix.Read("github/outbox/issue.alice.demo.7"); !v.Provided {
 		t.Fatal("the waiting read stands in no outbox step")
 	}
@@ -591,7 +613,7 @@ func TestARelayReadFailsWhenItsClockPassesItsWait(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "outbox step issue.alice.demo.7") {
 			t.Fatalf("the read past its wait answers %v, and wants it failed naming its outbox step", err)
 		}
-	case <-time.After(10 * time.Second): // bounds a failure that comes at once
+	case <-waiting.Fails():
 		t.Fatal("the read did not fail once its clock passed its wait")
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"kern/bus"
 	"kern/host"
 	"kern/index"
+	"kern/waiting"
 )
 
 // callerArg makes this test binary a caller's process: it calls "kept run"
@@ -77,12 +78,16 @@ component = "kept"
 
 // A caller killed outright sends no call.core.abandon: the core finds that
 // no connection hears its call's reply subject any more and gives the call
-// up as if it had, within the lease lapse; a live caller's call beside it
-// runs on to its end.
+// up as if it had, at a beat of the call, inside the lease lapse; a live
+// caller's call beside it runs on to its end. The case fires each beat
+// itself while the core's clock stands still, so no lease lapse ever comes:
+// only a beat gives the call up.
 func TestAKilledCallersCallIsGivenUp(t *testing.T) {
 	t.Parallel()
 	w, comps, held, gone, release := keptWiring(t)
-	c := served(t, host.Options{Clock: beating{newClock()}, Wiring: w, Components: comps, CallBeat: 50 * time.Millisecond})
+	const beat = 50 * time.Millisecond
+	clk := newBeats(beat)
+	c := served(t, host.Options{Clock: clk, Wiring: w, Components: comps, CallBeat: beat})
 	s, err := c.Standing()
 	if err != nil {
 		t.Fatal(err)
@@ -116,29 +121,51 @@ func TestAKilledCallersCallIsGivenUp(t *testing.T) {
 		select {
 		case word := <-held:
 			asked[word] = true
-		case <-time.After(wait):
+		case <-waiting.Fails():
 			t.Fatalf("the keeper holds %v, and wants both calls", asked)
 		}
 	}
-	select {
-	case err := <-gone:
-		t.Fatalf("a call is given up while both callers live: %v", err)
-	case <-time.After(200 * time.Millisecond):
+	// Each call waits on its beat; three beats of each while both callers
+	// live give no call up. A call's next wait of its beat shows that it
+	// looked at the beat before and runs on.
+	next := func() chan time.Time {
+		t.Helper()
+		select {
+		case fire := <-clk.waits:
+			return fire
+		case err := <-gone:
+			t.Fatalf("a call is given up while both callers live: %v", err)
+		case <-waiting.Fails():
+			t.Fatal("no call waits on its beat")
+		}
+		return nil
+	}
+	waits := []chan time.Time{next(), next()}
+	for range 3 {
+		for _, fire := range waits {
+			fire <- clk.Now()
+		}
+		waits = []chan time.Time{next(), next()}
 	}
 	if err := cmd.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	killed := time.Now()
-	select {
-	case err := <-gone:
-		if !errors.Is(err, host.ErrCallerGone) || !strings.HasPrefix(err.Error(), "dead: ") {
-			t.Fatalf("the keeper lets go of %v, and wants the killed caller's call given up as gone", err)
+	for _, fire := range waits {
+		fire <- clk.Now()
+	}
+	fails := waiting.Fails()
+	for given := false; !given; {
+		select {
+		case err := <-gone:
+			if !errors.Is(err, host.ErrCallerGone) || !strings.HasPrefix(err.Error(), "dead: ") {
+				t.Fatalf("the keeper lets go of %v, and wants the killed caller's call given up as gone", err)
+			}
+			given = true
+		case fire := <-clk.waits:
+			fire <- clk.Now()
+		case <-fails:
+			t.Fatal("the killed caller's call runs on")
 		}
-		if since := time.Since(killed); since > host.LeaseLapse {
-			t.Fatalf("the killed caller's call is given up after %v, beyond the lease lapse %v", since, host.LeaseLapse)
-		}
-	case <-time.After(host.LeaseLapse + wait):
-		t.Fatal("the killed caller's call runs on")
 	}
 	close(release)
 	select {
@@ -146,7 +173,7 @@ func TestAKilledCallersCallIsGivenUp(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(wait):
+	case <-waiting.Fails():
 		t.Fatal("the live call beside it does not answer")
 	}
 }

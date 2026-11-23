@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"kern/cli"
 	"kern/components/files"
@@ -26,6 +25,7 @@ import (
 	"kern/lint"
 	kernlsp "kern/lsp"
 	"kern/mcp"
+	"kern/waiting"
 )
 
 // wiring places the files module over docs and the checker beside it.
@@ -180,7 +180,7 @@ func (c *client) listen() {
 // ("" a reply); the deadline bounds a message that comes at once.
 func (c *client) next(method string) map[string]any {
 	c.t.Helper()
-	deadline := time.After(30 * time.Second)
+	deadline := waiting.Fails()
 	for {
 		select {
 		case m, ok := <-c.got:

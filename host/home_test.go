@@ -4,10 +4,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"kern/host"
 	"kern/index"
+	"kern/waiting"
 )
 
 // whereArg makes this test binary a placed process that writes, into the
@@ -47,11 +47,10 @@ func TestAPlacedProcessRunsWhereItsWiringCameFromAndKnowsTheCheckout(t *testing.
 		served(t, o)
 		file := filepath.Join(ran, "where.txt")
 		var got []byte
-		for end := time.Now().Add(wait); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
-			if got, err = os.ReadFile(file); err == nil && len(got) > 0 {
-				break
-			}
-		}
+		waiting.Until(t, "the placed process's "+file, func() bool {
+			got, err = os.ReadFile(file)
+			return err == nil && len(got) > 0
+		})
 		if string(got) != root {
 			t.Fatalf("home %v: the placed process wrote %q into %s, and wants the checkout %s", withHome, got, ran, root)
 		}
