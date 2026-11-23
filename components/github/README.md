@@ -146,7 +146,8 @@ counts at once.
 On each `PostToolUse`, `UserPromptSubmit` and `SessionStart` the component tells the agent the
 tool calls `outbox` waits for, reads and steps, oldest first, each with its note, as the host's
 hook `additionalContext`. A PostToolUse that answered a step first waits up to `tell-wait`
-(`300ms`) for the next step, so the agent is told it in the same hook.
+(`300ms`) for the next step, so the agent is told it in the same hook: a step asked after that
+answer, never one asked before it.
 
 ## Verbs and names
 
