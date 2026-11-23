@@ -201,7 +201,10 @@ func TestAStandingFileOfAnEndedCoreReadsAsAbsent(t *testing.T) {
 // environment restored from its snapshot is, gives its processes the pids of
 // the last boot: the standing file of that boot's core names a pid that runs
 // and is no core, and a bus that is gone. Two starts at once there leave
-// exactly one running core, which wrote the standing file anew.
+// exactly one running core, which wrote the standing file anew. The core is
+// held before its bus until both starts answered, so its claim stands for
+// the second start whichever start comes first: the order comes from the
+// release, not from how fast the core comes up.
 func TestTwoStartsOverAnEarlierBootsStandingFileLeaveOneCore(t *testing.T) {
 	t.Parallel()
 	root := checkout(t)
@@ -227,16 +230,21 @@ func TestTwoStartsOverAnEarlierBootsStandingFileLeaveOneCore(t *testing.T) {
 		t.Fatal(err)
 	}
 	want(t, run(t, nil, "status", "--root", root), 1, "kern: not running")
+	release := filepath.Join(t.TempDir(), "go")
+	hold := []string{"KERN_HOLD_START=" + release}
 	starts := make([]said, 2)
 	var wg sync.WaitGroup
 	for i := range starts {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			starts[i] = run(t, nil, "start", "--root", root)
+			starts[i] = run(t, hold, "start", "--root", root)
 		}()
 	}
 	wg.Wait()
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	spawned := 0
 	for _, s := range starts {
 		if s.code != 0 {
