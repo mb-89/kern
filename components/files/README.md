@@ -59,6 +59,7 @@ config = { folders = ["docs", "notes"] }
 | `search` | `{"pattern", "folder"}`: a Go regular expression, matched line by line | `{"matches": [{"path", "line", "text"}], "more", "unsearched"}` |
 | `write` | `{"path", "content", "version"}` | the file written, without content |
 | `remove` | `{"path", "version"}` | `{"path"}` |
+| `accept-free` | `template.accept` | `template.accepted`, always `{"free": true}`: the gate the port `template-accept` asks where the wiring binds it to nothing ([Template-only paths](#template-only-paths)) |
 
 - **Reads answer from the model.** `read` answers a held file from memory; one held by its hash
   alone is read from the disk. `list` and `search` read the model alone; `search` names in
@@ -83,11 +84,42 @@ the tools `files` (reads) and `files_write` (writes), named after the instance:
 |---|---|---|
 | `files read --path PATH` | `files` | the file from the model: its first line `PATH at version <hash> (<n> bytes):`, the rest its content |
 | `files edit --path PATH --version V --old TEXT --new TEXT [--all]` | `files_write` | replaces `--old`, which must occur once (or each, with `--all`), in the file standing at version V; a missing or repeated text is refused |
-| `files write --path PATH --version V --content TEXT` | `files_write` | writes the whole file; `--version ""` for a new one |
+| `files write --path PATH --version V (--content TEXT \| --filled JSON)` | `files_write` | writes the whole file; `--version ""` for a new one; `--filled` is a filled template, the JSON the template component's fill answered, which a path a template claims takes alone |
 | `files remove --path PATH --version V` | `files_write` | removes the file |
 
 Each write names the version `files read` answered and is refused, naming re-read, where the file
 changed since, as the verbs are.
+
+## Template-only paths
+
+A path a template claims is written only from a filled template, the type only an application's
+template component constructs (SE#1683, the person's decision of 22 Nov, typed templates). kern
+imports no application's package and holds no template, so the module asks the gate:
+
+- **The gate** is the request port `template-accept` (package `kern/filled`, shared with every
+  templated target in kern), of the shapes `template.accept` → `template.accepted`. An
+  application's wiring binds it to its template component's verb `accept`, which reads the paths
+  its templates claim:
+
+  ```toml
+  [wires]
+  "files.template-accept" = "template.accept"
+  ```
+
+- **Every write command asks it** before it writes: `files write` and `files edit` hand it
+  `{"target", "path", "filled"}`, the path as the module names it and the value as given (the text
+  of `--content` or of the edit, or the JSON of `--filled`). Where the gate answers `free`, no
+  template claims the path and the write goes as given, `--filled`'s document for a filled
+  template; otherwise the module writes the `document` the gate accepted, as it stands.
+- **A refusal** stops the command before anything is written and the file stays as it was: the
+  gate's reason names the template to fill, as in `files write of docs/claimed.md takes a filled
+  template of note, not free text: fill it with the template component's fill`.
+- **Bound to nothing**, the port asks the module's own verb `accept-free` (`index.RequestPort.Self`),
+  and every path is free, so an application without templates writes as before.
+- **What stays as it was:** `files remove`, which writes no content; the verbs `write` and `remove`
+  themselves, which a command asks after the gate (a verb asks no port in kern's index, so the
+  gate sits in the commands the door serves); and a hand edit on the disk, which the watcher
+  follows, as the person decided.
 
 ## The guard
 
@@ -152,6 +184,10 @@ a temporary folder, so no case waits for the disk to be noticed. Each case prove
   (`route_test.go`);
 - the door's commands read, edit, write and remove through the model, refuse a stale version, and
   the door serves them as `files` and `files_write`;
+- a free-text write or edit of a path a template claims is refused, naming the template, and leaves
+  the file as it was; a filled template is written as the gate answered its document; a path no
+  template claims, and every path while the gate is bound to nothing, takes the write as given
+  (`template_test.go`, against a fake template component);
 - Grep and Glob over a managed folder answer from the model in both hosts' formats, and a search
   in doubt passes.
 

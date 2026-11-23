@@ -22,6 +22,7 @@ named in the design's plan.
 | `mcp/` | the MCP door, `<name> mcp`: the catalog's read-only and writing commands as tools over stdio ([The MCP door](#the-mcp-door)) | |
 | `lint/` | the one checker of managed files: each file's template or schema, links that reach nothing, names over their caps; the language server, `<name> lint` and the tests ask it ([Language server](#language-server)) | quackitect v5 `Sweep` |
 | `lsp/` | the language server, `<name> lsp`: the checker's findings as diagnostics over stdio, which an editor starts ([Language server](#language-server)) | quackitect v5 `spec/design_output/lsp.md` |
+| `filled/` | the gate of every templated target in kern: the request port `template-accept` and its shapes `template.accept` → `template.accepted`, which an application's wiring binds to its template component's verb `accept` ([Files](#files)) | SE's `components/template` `accept` |
 | `form/` | the templates: `<name>.json`, its fields' shapes and schema, which the GitHub component fills and renders and the checker holds a rendered file to | `components/github/template.go` |
 | `cmd/kern/` | the bare binary: `kern start`, `kern status`, `kern stop`, `kern serve`, `kern hook`, `kern lint`, `kern lsp`, carrying kern's shared components | |
 | `components/clock/` | the clock: time as names, `time` since its start 10 times a second, and `second`, `minute` and `hour` counting up, which a component reads instead of keeping a timer ([its README](components/clock/README.md)) | |
@@ -257,6 +258,12 @@ option B).
   file watcher keeps the model in step, a hash reconcile at start and on the watcher's overflow
   catches what the watcher missed, and a cookie at start finds a deaf watcher out, after which
   reads read the disk.
+- **Template-only paths**: a write of a path a template claims takes only a filled template, the
+  type an application's template component constructs (SE#1683). The component asks the gate, its
+  request port `template-accept` (`filled/`), which the application's wiring binds to its template
+  component's verb `accept`: free text there is refused, naming the template to fill, and every
+  other path, and every path while the gate is bound to nothing, is free ([its
+  README](components/files/README.md#template-only-paths)).
 - **Outside managed folders** nothing changes.
 
 The component's [README](components/files/README.md) is its contract.
