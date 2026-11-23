@@ -20,7 +20,7 @@ named in the design's plan.
 | `git/` | kern's git door: every git command kern and SE's Go components run, real git outside tests and the fake (`git/gitfake/`) in them, both held to one contract (`git/contract_test.go`); a test that chose no backend is refused real git, and `SE_GIT_DOOR` picks a process's backend, its `fake:<state file>` read from the state SE's Python fake writes (`git/gitfake/state.go`) | SE's `scripts/git_door.py` |
 | `cli/` | the core's command line, the same for the bare core and every application: `<name> start`, `status`, `stop`, `serve`, `hook`, `mcp`, `lint`, `lsp` | |
 | `mcp/` | the MCP door, `<name> mcp`: the catalog's read-only and writing commands as tools over stdio ([The MCP door](#the-mcp-door)) | |
-| `lint/` | the one checker of managed files: each file's template or schema, links that reach nothing, names over their caps; the language server, `<name> lint` and the tests ask it ([Language server](#language-server)) | quackitect v5 `Sweep` |
+| `lint/` | the one checker of managed files: each file's template or schema, links that reach nothing, names over their caps, generated files marked and declared; the language server, `<name> lint` and the tests ask it ([Language server](#language-server)) | quackitect v5 `Sweep` |
 | `lsp/` | the language server, `<name> lsp`: the checker's findings as diagnostics over stdio, which an editor starts ([Language server](#language-server)) | quackitect v5 `spec/design_output/lsp.md` |
 | `filled/` | the gate of every templated target in kern: the request port `template-accept` and its shapes `template.accept` → `template.accepted`, which an application's wiring binds to its template component's verb `accept` ([Filled templates](#filled-templates), [Files](#files)) | SE's `components/template` `accept` |
 | `form/` | the templates the checker reads: `<name>.json`, its fields' shapes and schema, which the checker holds a rendered file to ([Templates](#templates)) | `components/github/template.go` |
@@ -60,7 +60,7 @@ bare run with `cli.Bare`, and the help renders them all.
 | `kern mcp [--grace D] [--idle D]` | the MCP door over stdio ([The MCP door](#the-mcp-door)): starts the core with the grace and idle given, or attaches to it, and holds a session lease while the client is connected |
 | `kern mcp --tools` | prints the tools the door would serve for the checkout, as `tools/list` answers them, indented JSON in served order, and exits 0: starts no core, takes no lease, reads no input ([The tool list's size](#the-tool-lists-size)) |
 | `kern hook <event> [--wait D] [--unanswered N]` | posts the host's hook JSON from stdin on `hook.<event>`, waiting up to 500 ms for a core whose start's claim stands; prints the answer as the host's hook JSON: a component's deny of the tool call with its reason, in the host's format, exit code 2 and the reason on stderr ([Agent tools](#agent-tools)); else the bound command's output, else the context the components told on `PostToolUse`, `UserPromptSubmit` and `SessionStart` (the [GitHub component](components/github/README.md)'s waiting tool calls) as `additionalContext`, nothing for a `pass` with nothing told; where no core answers, prints nothing; exits 0, or N where no command answered the event and nothing was told |
-| `kern lint [--wait D] [--json]` | starts the core or attaches to it, as `mcp` does, asks the lsp component's `lsp lint` and prints every finding over the managed files, `path:line:col: rule: message`, and their count on stderr, or with `--json` the answer as JSON; exits 1 where there is a finding, 2 where no core runs the checker ([Language server](#language-server)) |
+| `kern lint [--wait D] [--json]` | starts the core or attaches to it, as `mcp` does, asks the lsp component's `lsp lint` and prints every finding over the managed files, `path:line:col: rule: message` (a notice's rule followed by `notice`), and their count on stderr, or with `--json` the answer as JSON; exits 1 where a finding is an error, never for notices alone, 2 where no core runs the checker ([Language server](#language-server)) |
 | `kern lsp [--grace D] [--idle D]` | the language server over stdio, which an editor starts: the checker's findings as diagnostics on every managed file; starts the core with the grace and idle given, or attaches to it, beside the protocol, and holds a session lease while the editor is connected ([Language server](#language-server)) |
 | `kern forbids [--root DIR]` | scans the checkout's components (`components/`) against the forbid lists of the I/O components the binary carries and those declared there ([Forbid lists](#forbid-lists)): each use of another I/O module's entry is a line on stderr, naming the file, the line, the component's folder and the module that owns it, and the exit is 1; else one line on stdout and 0. It starts no core |
 
@@ -412,7 +412,8 @@ v5's `lsp` I/O module, whose one checker (`Sweep`) the editor's panel, the comma
 and the battery all asked, so there was no second road.
 
 - **One checker.** Package `lint` holds the rules: each managed file's template or schema, links
-  that reach nothing, and names over their caps. The [lsp component](components/lsp/README.md)
+  that reach nothing, names over their caps, and generated files marked and declared
+  ([Generated files](#generated-files)). The [lsp component](components/lsp/README.md)
   runs it over the warm model ([Files](#files)), and its command `lsp lint` answers the findings.
   Three roads ask it: the language server, `<name> lint`, and the tests through
   `lsptest.Findings(root)`, which runs the checkout's files and lsp instances on an index of their
@@ -420,8 +421,10 @@ and the battery all asked, so there was no second road.
 - **The server.** `<name> lsp` speaks the protocol over stdio. It answers the handshake at once
   and starts the core, or attaches to it, beside the protocol, as the MCP door does, holding a
   session lease while the editor is connected. It publishes the findings as diagnostics (an error
-  each, its rule as its code, `kern` as its source) on every managed file, not only the open ones,
-  and an empty list on a file whose findings are gone.
+  each, information for a notice, its rule as its code, `kern` as its source) on every managed
+  file, not only the open ones, and an empty list on a file whose findings are gone.
+- **A notice** (`severity` `notice` in a finding) tells and fails nothing: `<name> lint` exits 1
+  only on an error, and a test fails on `lint.Errors(found)`, the findings that are errors.
 - **Its redraw roads**, v5's: an open and each typed change check the editor's buffer in place of
   the file (full sync); a save, a close and a change on the disk check the model, which the files
   module keeps in step with the disk, and the server hears the lsp instance's `findings` change
@@ -451,6 +454,38 @@ is no write path: a write takes a filled template ([Filled templates](#filled-te
   its shape (a required field filled, `None` only where `none_ok` lets it stand, a choice among
   its choices, at most `max_words` words) and its schema (`type`, `properties`, `required`,
   `additionalProperties`, `items` and `enum`).
+
+### Generated files
+
+Every file a program writes says so, naming its generator and its source (SE's guidance note
+`generated-files-are-marked` owns the rule, its wording and its regular expressions; SE's
+`scripts/generated.py` holds the same reading). The checker's rule `generated` holds it:
+
+- **The marker**, `Code generated by <generator> from <source>. DO NOT EDIT.`, in the file's
+  comment syntax (`#` for `.toml`, `.yaml`, `.sh`, `.ps1`, `.py`, `.lock` and a file with a `#!`
+  line, `//` for `.go`, `.js` and `.ts`, `<!-- -->` for `.md`, `.html` and `.xml`), on its first
+  line, or on the line after a `#!` line, an `<?xml` line or Markdown front matter. `lint.Line`
+  writes it, `lint.MarkerAt` reads it; a generator calls them rather than spelling the wording.
+- **No comments:** a format without comments (JSON, plain text) is marked in `.gitattributes`,
+  `<path> linguist-generated generated-by=<generator>`, the generator's spaces written `:`.
+- **The declarations:** `generated.yaml` at the checkout's root lists each generator, its source,
+  the paths it writes (globs) and how a fresh run is compared (`check`, `held_by` or
+  `unchecked`). Third-party lock files (`go.sum`, `uv.lock` and the others of `lint.Locks`) are
+  exempt.
+- **Its errors:** a declared output without its marker or its attributes, a marker of another
+  generator, a marked file no declaration covers, a file two declare, a declared lock file, a
+  declaration that matches no file and a holder that does not exist. The checker judges what it
+  is handed: declarations where the model holds `generated.yaml` or the whole checkout, an
+  output only where it lies in a managed folder. It runs no generator; the fresh runs are SE's
+  `generated.py check`'s.
+- **Its notice**, on each generated file, is what the editor shows: `generated by <generator> from
+  <source>; edit <source>`, as information, from the buffer as it is typed.
+
+kern's own generators are declared in its `generated.yaml`: the MCP door's golden answers
+(`door_test.go -golden`), the hot tests' recordings (`kerntest Hot.Record`) and the move-out list
+(`moveout_test.go -update`), and the template's `RUNME.sh` and `RUNME.ps1`, SE's files as SE's
+`se_workflows.py write` writes them. `lint/kern_test.go` holds kern's tree to the rule, so `go test ./...`
+fails where a generated file goes unmarked or undeclared; SE's `generated.py check` finds the same.
 
 ### In VS Code
 
@@ -629,7 +664,10 @@ world.
   hot test and the time it was recorded. Its value or answer is the real one, trimmed to the keys
   and items the expectation states. So it holds what the reader relies on and nothing else of the
   service, and no recording names kern's home (the GitHub hot test also writes the home back as
-  the placeholders `owner` and `repo`).
+  the placeholders `owner` and `repo`). It is a generated file in a format without comments
+  ([Generated files](#generated-files)), so `.gitattributes` marks every recording, `*.recorded.json
+  linguist-generated generated-by=kerntest:Hot.Record`, and `generated.yaml` declares it; an
+  application that records adds the same two.
 - **The reader's fake answers from it.** `kerntest.Expecting` and `kern.fake.expecting` answer an
   expectation with its recording where one exists, else with what the file states. `Stale()`
   (`stale` in Python) names each recording older than `kerntest.RecordingAge`, 30 days, or the age

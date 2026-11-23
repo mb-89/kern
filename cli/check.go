@@ -29,7 +29,8 @@ func lintFlags(fs *flag.FlagSet) {
 
 // runLint starts the core or attaches to it, asks the lsp component's
 // command for every finding over the warm model, and prints each as
-// path:line:col: rule: message; exit 1 where there is one.
+// path:line:col: rule: message; exit 1 where one is an error, never for a
+// notice alone.
 func runLint(c *Call) int {
 	root, ok := rooted(c)
 	if !ok {
@@ -80,9 +81,14 @@ func runLint(c *Call) int {
 		for _, f := range got.Findings {
 			fmt.Fprintln(c.Stdout, f)
 		}
-		fmt.Fprintf(c.Stderr, "%s lint: %d findings in %d managed files\n", c.Name, len(got.Findings), got.Checked)
+		errs := len(lint.Errors(got.Findings))
+		notices := ""
+		if n := len(got.Findings) - errs; n > 0 {
+			notices = fmt.Sprintf(" and %d notices", n)
+		}
+		fmt.Fprintf(c.Stderr, "%s lint: %d findings%s in %d managed files\n", c.Name, errs, notices, got.Checked)
 	}
-	if len(got.Findings) > 0 {
+	if len(lint.Errors(got.Findings)) > 0 {
 		return 1
 	}
 	return 0

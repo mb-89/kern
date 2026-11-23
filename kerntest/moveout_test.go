@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"kern/lint"
 )
 
 // The move-out report: everything under kern/ that names SE or one host,
@@ -27,6 +29,13 @@ var updateMoveOut = flag.Bool("update", false, "rewrite testdata/names-se-or-hos
 const (
 	patternsFile = "testdata/names-patterns.txt"
 	listFile     = "testdata/names-se-or-host.txt"
+)
+
+// The list is a generated file: its first line is the marker that names its
+// generator and its source, as kern's generated.yaml declares them.
+const (
+	moveOutGenerator = "moveout_test.go -update"
+	moveOutSource    = "kerntest/testdata/names-patterns.txt over kern's tree"
 )
 
 // moveOutPattern is one line of the patterns file: a kind and its regexp.
@@ -224,8 +233,9 @@ func reportMoveOut(found []moveOutEntry, patterns []moveOutPattern) string {
 // listText is the list file's content for the entries found.
 func listText(found []moveOutEntry) string {
 	var b strings.Builder
+	b.WriteString(lint.Line(moveOutGenerator, moveOutSource, lint.Hash) + "\n")
 	b.WriteString("# Everything under kern/ that names SE or one host, as it stands: kind, file, match,\n")
-	b.WriteString("# tab-separated. moveout_test.go writes it with -update and reports what differs.\n")
+	b.WriteString("# tab-separated; moveout_test.go reports what differs.\n")
 	for _, e := range found {
 		b.WriteString(e.String() + "\n")
 	}
@@ -261,6 +271,9 @@ func TestMoveOutListsWhatNamesSEOrAHost(t *testing.T) {
 	text, err := os.ReadFile(filepath.FromSlash(listFile))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if first, _, _ := strings.Cut(strings.ReplaceAll(string(text), "\r\n", "\n"), "\n"); first != lint.Line(moveOutGenerator, moveOutSource, lint.Hash) {
+		t.Errorf("%s opens with %q, and wants its marker; run go test ./kerntest -run MoveOut -update", listFile, first)
 	}
 	list, err := parseMoveOutList(string(text))
 	if err != nil {
