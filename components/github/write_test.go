@@ -37,15 +37,15 @@ func fillOf(template, title, document string) map[string]any {
 // template component does. It records each request it was asked.
 type acceptor struct {
 	mu    sync.Mutex
-	asked []filled.Accept
+	asked []filled.Request
 	// answer, where set, is what accept answers in place of the value's own.
 	answer *filled.Accepted
 }
 
 func (a *acceptor) component() *index.Component {
 	return index.Declare("template", "The application's template component, faked.", index.IO(),
-		index.JSONVerb("accept", "Accepts a filled template its fill made.", filled.AcceptShape, filled.AcceptedShape,
-			func(_ context.Context, req filled.Accept) (filled.Accepted, error) {
+		index.JSONVerb("accept", "Accepts a filled template its fill made.", filled.RequestShape, filled.AnswerShape,
+			func(_ context.Context, req filled.Request) (filled.Accepted, error) {
 				a.mu.Lock()
 				a.asked = append(a.asked, req)
 				answer := a.answer
@@ -70,10 +70,10 @@ func (a *acceptor) component() *index.Component {
 	)
 }
 
-func (a *acceptor) requests() []filled.Accept {
+func (a *acceptor) requests() []filled.Request {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return append([]filled.Accept{}, a.asked...)
+	return append([]filled.Request{}, a.asked...)
 }
 
 type refusal struct{ s string }

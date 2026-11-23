@@ -66,7 +66,7 @@ type Written struct {
 var (
 	createPort  = index.JSONRequest("file-issue", "Files an issue through the verb issue-create.", IssueCreateShape, WrittenShape).Self("issue-create")
 	commentPort = index.JSONRequest("file-comment", "Comments on an issue through the verb issue-comment.", IssueCommentShape, WrittenShape).Self("issue-comment")
-	acceptPort  = filled.Port("Asks the application's template component whether it accepts the filled template a write was handed, and answers its title and document; the wiring binds it to that component's verb accept.")
+	acceptPort  = filled.NewPort("Asks the application's template component whether it accepts the filled template a write was handed, and answers its title and document; the wiring binds it to that component's verb accept.").Optional()
 )
 
 // writeParts are the write verbs and the writing commands that ask them.
@@ -191,13 +191,13 @@ func parseWrite(fs *flag.FlagSet, args []string, repo, value *string) (writeArgs
 // takes no free text, so an answer that the value is free is refused too; an
 // issue needs the title the template answers.
 func (g *GitHub) accept(ctx context.Context, verb string, value any, titled bool) (filled.Accepted, error) {
-	ans, err := acceptPort.Within(ctx, filled.Accept{Target: "github " + verb, Filled: value})
+	ans, err := acceptPort.Within(ctx, filled.Request{Target: "github " + verb, Filled: value})
 	if err != nil {
 		return filled.Accepted{}, fmt.Errorf("github %s: %w; nothing reached GitHub", verb, err)
 	}
-	var a filled.Accepted
-	if err := index.Recode(ans, &a); err != nil {
-		return filled.Accepted{}, fmt.Errorf("github %s: the template component's answer is no %s: %w; nothing reached GitHub", verb, filled.AcceptedShape, err)
+	a, err := filled.Answer(ans)
+	if err != nil {
+		return filled.Accepted{}, fmt.Errorf("github %s: %w; nothing reached GitHub", verb, err)
 	}
 	switch {
 	case a.Free || a.Document == "":
