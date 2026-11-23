@@ -130,3 +130,41 @@ func TestAFreeTextWriteToAClaimedPathIsRefusedAndAFilledTemplateIsWritten(t *tes
 		t.Fatalf("--content with --filled answers %v", err)
 	}
 }
+
+// A write elsewhere in the managed folders is unchanged: a path no template
+// claims takes free text, an edit and a filled template's document as given,
+// and a wiring that binds the gate to nothing leaves every path free.
+func TestAWriteToAPathNoTemplateClaimsIsUnchanged(t *testing.T) {
+	t.Parallel()
+	root := docsFolder(t)
+	_, ix := gated(t, root)
+	if r, err := ix.Call("files write", "--path", "docs/free.md", "--version", "", "--content", "one\n"); err != nil || !strings.Contains(r.Text, "wrote docs/free.md") {
+		t.Fatalf("a free-text write to an unclaimed path answers %q, %v", r.Text, err)
+	}
+	r, _ := ix.Call("files read", "--path", "docs/free.md")
+	if _, err := ix.Call("files edit", "--path", "docs/free.md", "--version", strings.Fields(r.Text)[3], "--old", "one", "--new", "two"); err != nil {
+		t.Fatalf("an edit of an unclaimed path answers %v", err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "docs", "free.md")); string(data) != "two\n" {
+		t.Fatalf("after the edit the disk holds %q", data)
+	}
+	made, _ := json.Marshal(map[string]any{"template": "note", "document": "doc\n", "seal": "made by fill"})
+	if _, err := ix.Call("files write", "--path", "docs/other.md", "--version", "", "--filled", string(made)); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "docs", "other.md")); string(data) != "doc\n" {
+		t.Fatalf("a filled template on an unclaimed path writes %q, and wants its document", data)
+	}
+	if _, err := ix.Call("files write", "--path", "notes/n.md", "--version", "", "--content", "x"); err == nil || !strings.Contains(err.Error(), "no managed folder holds it") {
+		t.Fatalf("a write outside the managed folders answers %v, and wants the module's refusal", err)
+	}
+
+	unbound := docsFolder(t)
+	_, plain := indexed(t, unbound, "docs")
+	if _, err := plain.Call("files write", "--path", claimed, "--version", "", "--content", "free\n"); err != nil {
+		t.Fatalf("with the gate bound to nothing, a write answers %v, and wants every path free", err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(unbound, filepath.FromSlash(claimed))); string(data) != "free\n" {
+		t.Fatalf("with the gate bound to nothing the disk holds %q", data)
+	}
+}
