@@ -14,6 +14,7 @@ import (
 	"kern/cli"
 	"kern/host"
 	"kern/index"
+	"kern/waiting"
 )
 
 // placeDrip writes drip's folder and a wiring that places it in its own Python
@@ -116,7 +117,7 @@ func TestARealStepThatTalksOutlivesTheStepWaitAndStreamsToItsCaller(t *testing.T
 	}
 	var lines []string
 	var a host.CallAnswer
-	deadline := time.After(30 * time.Second)
+	deadline := waiting.Fails()
 	for done := false; !done; {
 		select {
 		case m := <-heard:

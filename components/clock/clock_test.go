@@ -9,6 +9,7 @@ import (
 
 	"kern/components/clock"
 	"kern/index"
+	"kern/waiting"
 )
 
 // fake is a host clock the test moves: each After is handed to the test,
@@ -37,7 +38,7 @@ func (f *fake) fire(t *testing.T, at time.Time) {
 	var c chan time.Time
 	select {
 	case c = <-f.waits:
-	case <-time.After(5 * time.Second): // bounds a wait the loop asks at once
+	case <-waiting.Fails(): // bounds a wait the loop asks at once
 		t.Fatal("the clock's loop asked no wait")
 	}
 	f.mu.Lock()
@@ -83,7 +84,7 @@ func next(t *testing.T, ch chan any, what string) any {
 	select {
 	case v := <-ch:
 		return v
-	case <-time.After(5 * time.Second): // bounds a commit the fired wait makes at once
+	case <-waiting.Fails(): // bounds a commit the fired wait makes at once
 		t.Fatalf("no %s was committed", what)
 	}
 	return nil

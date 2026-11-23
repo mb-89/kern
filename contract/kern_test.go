@@ -21,6 +21,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"kern/bus"
 	"kern/host"
+	"kern/waiting"
 )
 
 // kern is the binary under test, built once for the suite.
@@ -201,7 +202,10 @@ func TestAStandingFileOfAnEndedCoreReadsAsAbsent(t *testing.T) {
 // environment restored from its snapshot is, gives its processes the pids of
 // the last boot: the standing file of that boot's core names a pid that runs
 // and is no core, and a bus that is gone. Two starts at once there leave
-// exactly one running core, which wrote the standing file anew.
+// exactly one running core, which wrote the standing file anew. The core is
+// held before its bus until both starts answered, so its claim stands for
+// the second start whichever start comes first: the order comes from the
+// release, not from how fast the core comes up.
 func TestTwoStartsOverAnEarlierBootsStandingFileLeaveOneCore(t *testing.T) {
 	t.Parallel()
 	root := checkout(t)
@@ -227,16 +231,21 @@ func TestTwoStartsOverAnEarlierBootsStandingFileLeaveOneCore(t *testing.T) {
 		t.Fatal(err)
 	}
 	want(t, run(t, nil, "status", "--root", root), 1, "kern: not running")
+	release := filepath.Join(t.TempDir(), "go")
+	hold := []string{"KERN_HOLD_START=" + release}
 	starts := make([]said, 2)
 	var wg sync.WaitGroup
 	for i := range starts {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			starts[i] = run(t, nil, "start", "--root", root)
+			starts[i] = run(t, hold, "start", "--root", root)
 		}()
 	}
 	wg.Wait()
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	spawned := 0
 	for _, s := range starts {
 		if s.code != 0 {
@@ -297,7 +306,7 @@ func TestTheStandingFileLetsAClientAttach(t *testing.T) {
 		if !strings.Contains(err.Error(), "Permissions Violation") {
 			t.Fatalf("a client's commit answers %v, and wants a permissions violation", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-waiting.Fails():
 		t.Fatal("the bus lets a client commit")
 	}
 }
@@ -466,13 +475,7 @@ func TestACoreKilledOutrightIsToldOnce(t *testing.T) {
 	if err := p.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	end := time.Now().Add(20 * time.Second)
-	for run(t, nil, "status", "--root", root).code != 1 {
-		if time.Now().After(end) {
-			t.Fatal("the killed core still answers")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waiting.Until(t, "the killed core's end", func() bool { return run(t, nil, "status", "--root", root).code == 1 })
 	got := run(t, nil, "hook", "UserPromptSubmit", "--root", root)
 	var out struct {
 		HookSpecificOutput struct{ AdditionalContext string } `json:"hookSpecificOutput"`
@@ -515,13 +518,7 @@ func TestARestoredBootTellsNoStaleDeadCore(t *testing.T) {
 	if err := p.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	end := time.Now().Add(20 * time.Second)
-	for run(t, bootA, "status", "--root", root).code != 1 {
-		if time.Now().After(end) {
-			t.Fatal("the killed core still answers")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waiting.Until(t, "the killed core's end", func() bool { return run(t, bootA, "status", "--root", root).code == 1 })
 	if got := run(t, bootB, "hook", "UserPromptSubmit", "--root", root); strings.Contains(got.out, "additionalContext") {
 		t.Fatalf("the restored boot's first hook tells the earlier boot's core: %q", got.out)
 	}
@@ -612,15 +609,11 @@ func TestAHookDeniesAWriteToAManagedFileInEachHostsFormat(t *testing.T) {
 	}
 	docs, _ := json.Marshal(filepath.Join(root, "docs"))
 	grep := `{"session_id":"s1","tool_name":"Grep","tool_input":{"pattern":"needle","path":` + string(docs) + `},"cwd":` + string(cwd) + `}`
-	deadline := time.Now().Add(20 * time.Second)
-	for {
+	waiting.Until(t, "a Grep over the managed folder answered from the model", func() bool {
 		out, _, code := hook("PreToolUse", grep)
-		if code == 2 && strings.Contains(out, "warm model") && strings.Contains(out, "b.md") {
-			break
-		}
-		if code != 0 && code != 2 || time.Now().After(deadline) {
+		if code != 0 && code != 2 {
 			t.Fatalf("a Grep over the managed folder prints %q with exit code %d, and wants its answer from the model", out, code)
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return code == 2 && strings.Contains(out, "warm model") && strings.Contains(out, "b.md")
+	})
 }

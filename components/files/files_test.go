@@ -17,6 +17,7 @@ import (
 	"kern/host"
 	"kern/index"
 	"kern/kerntest"
+	"kern/waiting"
 )
 
 // fed is a watcher the case feeds by hand: it decides what arrives and when,
@@ -470,7 +471,7 @@ config = { folders = ["docs"], cookie-wait = "30s" }
 			if v != true {
 				t.Fatalf("the real watcher's cookie: watching %v", v)
 			}
-		case <-time.After(30 * time.Second):
+		case <-waiting.Fails():
 			t.Fatal("the real watcher did not report the cookie")
 		}
 	}
@@ -480,7 +481,7 @@ config = { folders = ["docs"], cookie-wait = "30s" }
 	if err := os.WriteFile(filepath.Join(root, "docs", "a.md"), []byte("by hand\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.After(30 * time.Second)
+	deadline := waiting.Fails()
 	for {
 		select {
 		case v := <-model:

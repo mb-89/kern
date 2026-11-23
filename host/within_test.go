@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"kern/host"
+	"kern/waiting"
 )
 
 // handed is a clock whose one wait the case fires itself.
@@ -31,7 +32,7 @@ func TestWithinEndsWhenItsClockPassesTheWait(t *testing.T) {
 	clk.fire <- time.Time{}
 	select {
 	case <-ctx.Done():
-	case <-time.After(10 * time.Second): // bounds an end that comes at once
+	case <-waiting.Fails(): // bounds an end that comes at once
 		t.Fatal("the context did not end once its clock passed the wait")
 	}
 	if cause := context.Cause(ctx); !errors.Is(cause, context.DeadlineExceeded) || cause.Error() != "no answer within 1h0m0s: context deadline exceeded" {

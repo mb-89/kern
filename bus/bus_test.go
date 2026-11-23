@@ -8,6 +8,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"kern/bus"
+	"kern/waiting"
 )
 
 // wait is how long a case waits on an event that comes within milliseconds.
@@ -58,7 +59,7 @@ func violation(t *testing.T, errs <-chan error, subject string) {
 		if !errors.Is(err, nats.ErrPermissionViolation) || !strings.Contains(err.Error(), subject) {
 			t.Fatalf("the bus answers %v, and wants a permissions violation naming %s", err, subject)
 		}
-	case <-time.After(wait):
+	case <-waiting.Fails():
 		t.Fatalf("the bus lets the publish on %s through without a permissions violation", subject)
 	}
 }
@@ -88,7 +89,7 @@ func TestASecondWriterIsRefusedByTheBus(t *testing.T) {
 		if m.Subject != bus.Commit+"report" {
 			t.Fatalf("the core hears a commit on %s, and wants only report's own, commit.report", m.Subject)
 		}
-	case <-time.After(wait):
+	case <-waiting.Fails():
 		t.Fatal("the core hears no commit on report's own subject")
 	}
 }

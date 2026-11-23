@@ -12,6 +12,7 @@ import (
 	"kern/bus"
 	"kern/host"
 	"kern/index"
+	"kern/waiting"
 )
 
 const quietDeclaration = `name = "quiet"
@@ -67,7 +68,7 @@ func TestAStepWhoseAnswerTheBusRefusedFailsAtOnce(t *testing.T) {
 	var step *nats.Msg
 	select {
 	case step = <-steps:
-	case <-time.After(wait):
+	case <-waiting.Fails():
 		t.Fatal("the process hears nothing on cmd.quiet.>")
 	}
 	var s index.Step
@@ -86,7 +87,7 @@ func TestAStepWhoseAnswerTheBusRefusedFailsAtOnce(t *testing.T) {
 			!strings.Contains(a.Error, why) {
 			t.Fatalf("the call whose answer the bus refused answers %s, and wants the refusal named", m.Data)
 		}
-	case <-time.After(wait):
-		t.Fatalf("the call whose answer the bus refused answers nothing within %v: it waits out its step wait", wait)
+	case <-waiting.Fails():
+		t.Fatalf("the call whose answer the bus refused answers nothing within %v: it waits out its step wait", waiting.Bound)
 	}
 }

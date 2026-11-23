@@ -152,7 +152,7 @@ func jsonInt(n int) string { b, _ := json.Marshal(n); return string(b) }
 
 func TestTheStartKeepsTheNewestSessionFiles(t *testing.T) {
 	dir := t.TempDir()
-	old := time.Now().Add(-time.Hour)
+	old := time.Date(2026, time.January, 1, 9, 0, 0, 0, time.UTC)
 	for i, name := range []string{"a.jsonl", "b.jsonl", "c.jsonl", "d.jsonl", "e.jsonl", "notes.txt"} {
 		path := filepath.Join(dir, name)
 		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {

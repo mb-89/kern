@@ -10,11 +10,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"kern/bus"
 	"kern/index"
 	"kern/kerntest"
+	"kern/waiting"
 )
 
 // The suite's cases, in cases.json: each runs against the Go fake here, the
@@ -320,10 +320,6 @@ func goTally() *index.Component {
 	)
 }
 
-// meetWait is how long tally meet waits for another call: calls that ran one
-// after the other never meet.
-const meetWait = 10 * time.Second
-
 // meeting is tally meet's: the call waiting for another, its name and where the other's goes.
 var meeting struct {
 	sync.Mutex
@@ -352,7 +348,7 @@ func meet(name string) (string, error) {
 	select {
 	case <-w.arrive:
 		return w.other, nil
-	case <-time.After(meetWait):
+	case <-waiting.Fails():
 	}
 	meeting.Lock()
 	defer meeting.Unlock()
@@ -361,7 +357,7 @@ func meet(name string) (string, error) {
 		return w.other, nil
 	default:
 		meeting.waiting = nil
-		return "", fmt.Errorf("no other call of tally meet ran beside %s within %v", name, meetWait)
+		return "", fmt.Errorf("no other call of tally meet ran beside %s within %v", name, waiting.Bound)
 	}
 }
 

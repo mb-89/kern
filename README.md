@@ -36,6 +36,7 @@ named in the design's plan.
 | `python/tests/` | the Python fake's leg of the contract suite and the sample component's test, run by `se.toml` `[tests.beside.python]` | |
 | `release.toml` | kern's version and the one URL its release is published under ([Release](#release)) | |
 | `tools/release/` | builds the release: six archives and `SHA256SUMS` | |
+| `waiting/` | how a test waits without the wall clock: `waiting.Fails`, the failure case of a select on an event, and `waiting.Until`, a look at a state that gives no event, both bounded by `waiting.Bound` alone ([Tests](#tests)) | SE's `tests/waiting.py` |
 | `forbid/` | the scan that holds every I/O module to its forbid list: the Go and Python code under `components/` that uses another I/O module's entry ([Forbid lists](#forbid-lists)) | |
 | `tools/expect/` | `pending`: lists the pending expectations per claimer ([Pending expectations](#pending-expectations)) | |
 | `template/` | the bare application every new application starts from ([The template](#the-template)) | |
@@ -549,7 +550,15 @@ the template's, and `[tests.beside.release-guard]` (below).
 No test waits on the wall clock. A time limit under test (a step wait, a reply's expiry, a hang-up,
 a beat) is shortened to milliseconds through the core's options or its `KERN_*` variables, or the
 case reads a fake clock or the state that settles it instead; a deadline only bounds a wait for
-something that happens at once where the test passes.
+something that happens at once where the test passes. That deadline is `waiting.Bound`'s, and
+`waiting/` is its one home: a select on an event fails with `waiting.Fails()`, and a look at a
+state that gives no event of its own, such as a process's end, repeats through `waiting.Until`.
+The wait check, `kerntest/waits_test.go`, refuses in every `_test.go` of kern a `time.Sleep`, a
+`time.After`, a `time.NewTimer` and a deadline from `time.Now` (`time.Now().Add`), under any import
+name of package `time`. It runs in `go test ./...`, so the landing's suite, the push to `main`
+(which needs a passing suite recorded) and CI's `check` refuse a test that waits on the wall clock.
+SE's commit hook runs no command of a project's yet, so a commit is held to it only once SE's hook
+runs one.
 
 `.github/workflows/check.yml` is the check `main`'s ruleset requires, `check`. Its job `check`
 gates the commits with SE's public check, holds a pull request to the work model's issue rule and

@@ -16,6 +16,7 @@ import (
 	"kern/components/github"
 	"kern/host"
 	"kern/index"
+	"kern/waiting"
 )
 
 // stepper is another component whose command `run <tool> <input JSON>` runs
@@ -102,15 +103,12 @@ func startedSteps(t *testing.T, o github.Options, config string) (*github.GitHub
 // waitOutbox waits until the relay tells a step, and answers what it tells.
 func waitOutbox(t *testing.T, g *github.GitHub, has string) string {
 	t.Helper()
-	end := time.Now().Add(10 * time.Second)
-	for time.Now().Before(end) {
-		if text := g.Outbox(); strings.Contains(text, has) {
-			return text
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("the outbox never told %q; it tells %q", has, g.Outbox())
-	return ""
+	var text string
+	waiting.Until(t, fmt.Sprintf("the outbox's step %q", has), func() bool {
+		text = g.Outbox()
+		return strings.Contains(text, has)
+	})
+	return text
 }
 
 type called struct {
@@ -402,24 +400,15 @@ func TestAGivenUpCallsStepLeavesTheOutbox(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "the call is given up: the caller is gone") {
 			t.Fatalf("the given-up call answers %v", err)
 		}
-	case <-time.After(10 * time.Second):
+	case <-waiting.Fails():
 		t.Fatal("the given-up call still waits for its step")
 	}
-	// Half the stepper's step wait of 10s: the step goes with its call, not with its wait.
-	end := time.Now().Add(5 * time.Second)
-	for {
+	// The component's clock stands still, so the step's wait never passes:
+	// the step goes with its call, not with its wait.
+	waiting.Until(t, "the given-up call's step leaving the outbox", func() bool {
 		v, err := ix.Read(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if g.Outbox() == "" && !v.Provided {
-			break
-		}
-		if time.Now().After(end) {
-			t.Fatalf("the given-up call's step stands in the outbox: %q, %s holds %+v", g.Outbox(), name, v)
-		}
-		time.Sleep(time.Millisecond)
-	}
+		return err == nil && g.Outbox() == "" && !v.Provided
+	})
 	if said := ix.Tell("UserPromptSubmit", nil); len(said) != 0 {
 		t.Fatalf("a session is told %q after the call was given up", said)
 	}
@@ -508,7 +497,7 @@ func TestTwoStepsOneAnswerMatchesAreAnsweredOldestFirst(t *testing.T) {
 		}
 	case <-second:
 		t.Fatal("the newer step was answered first")
-	case <-time.After(10 * time.Second):
+	case <-waiting.Fails():
 		t.Fatal("the older step is not answered")
 	}
 	if text := g.Outbox(); !strings.Contains(text, "1. add_issue_comment "+in(newer)) || strings.Contains(text, "2. ") {

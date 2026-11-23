@@ -13,6 +13,7 @@ import (
 	"kern/bus"
 	"kern/host"
 	"kern/index"
+	"kern/waiting"
 )
 
 // slow is a command of two steps: the first says a line and asks the slow I/O
@@ -55,11 +56,14 @@ component = "runner"
 // A call that names a progress subject in its caller's inbox hears each line
 // as its step says it and a beat every CallBeat while the call runs, before
 // its one answer, which still holds every line: the caller waits as long as
-// the core says anything, not a fixed time.
+// the core says anything, not a fixed time. The case fires the call's beats
+// on the core's clock itself.
 func TestAStreamingCallHearsItsLinesAndBeatsBeforeItsAnswer(t *testing.T) {
 	t.Parallel()
 	w, comps, release := slowWiring(t)
-	c := served(t, host.Options{Clock: beating{newClock()}, Wiring: w, Components: comps, CallBeat: 10 * time.Millisecond})
+	const beat = 10 * time.Millisecond
+	clk := newBeats(beat)
+	c := served(t, host.Options{Clock: clk, Wiring: w, Components: comps, CallBeat: beat})
 	client := as(t, c, bus.Client)
 	inbox := bus.Inbox(bus.Client) + ".case"
 	progress, reply := inbox+".progress", inbox+".reply"
@@ -75,8 +79,11 @@ func TestAStreamingCallHearsItsLinesAndBeatsBeforeItsAnswer(t *testing.T) {
 	}
 	var lines []string
 	beats := 0
+	fails := waiting.Fails()
 	for answered := false; !answered; {
 		select {
+		case fire := <-clk.waits: // the case beats the call's clock
+			fire <- clk.Now()
 		case m := <-heard:
 			if m.Subject == reply {
 				if beats < 2 || strings.Join(lines, "|") != "Phase: holding x|Phase: answered" {
@@ -104,7 +111,7 @@ func TestAStreamingCallHearsItsLinesAndBeatsBeforeItsAnswer(t *testing.T) {
 					close(release) // the held verb answers once the caller heard it beat twice
 				}
 			}
-		case <-time.After(wait):
+		case <-fails:
 			t.Fatalf("the call says nothing more after %d beats and the lines %q", beats, lines)
 		}
 	}
@@ -169,7 +176,7 @@ func TestACallerGivesUpItsOwnCallAndTheCallBesideItRunsOn(t *testing.T) {
 				t.Fatal(err)
 			}
 			return m.Subject, a
-		case <-time.After(wait):
+		case <-waiting.Fails():
 			t.Fatal("no call answers")
 		}
 		return "", host.CallAnswer{}
@@ -268,7 +275,7 @@ component = "held"
 		select {
 		case m := <-steps:
 			return m
-		case <-time.After(wait):
+		case <-waiting.Fails():
 			t.Fatal("the process hears nothing on cmd.held.>")
 		}
 		return nil
@@ -302,7 +309,7 @@ component = "held"
 		if err := json.Unmarshal(m.Data, &a); err != nil || !strings.Contains(a.Error, "given up") {
 			t.Fatalf("the given-up call answers %s", m.Data)
 		}
-	case <-time.After(wait):
+	case <-waiting.Fails():
 		t.Fatal("the given-up call answers nothing")
 	}
 }
@@ -380,7 +387,7 @@ component = "asker"
 		select {
 		case m := <-asked:
 			return m
-		case <-time.After(wait):
+		case <-waiting.Fails():
 			t.Fatal("the process hears nothing on io.desk.>")
 		}
 		return nil
@@ -414,7 +421,7 @@ component = "asker"
 		if err := json.Unmarshal(m.Data, &a); err != nil || !strings.Contains(a.Error, "given up") {
 			t.Fatalf("the given-up call answers %s", m.Data)
 		}
-	case <-time.After(wait):
+	case <-waiting.Fails():
 		t.Fatal("the given-up call answers nothing")
 	}
 }

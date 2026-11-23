@@ -280,21 +280,19 @@ func numbered(from, n int, field string) string {
 func TestTheRelayListsPullsPageByPage(t *testing.T) {
 	t.Parallel()
 	ix := startedLists(t, github.Options{Clock: &clock{now: nine}, Token: noToken}, listWiring(t, `relay-wait = "10s"`))
+	asked := steps(t, ix, "github/outbox/pull-list.alice.demo.all")
 	go func() {
 		pages := map[float64]string{1: numbered(1, 100, "number"), 2: numbered(101, 1, "number")}
 		for len(pages) > 0 {
-			if v, _ := ix.Read("github/outbox/pull-list.alice.demo.all"); v.Provided {
-				in := v.V.(github.Step).Input
-				page, _ := in["page"].(int)
-				if page == 0 {
-					page = 1
-				}
-				if body, ok := pages[float64(page)]; ok {
-					delete(pages, float64(page))
-					_ = ix.Hear(github.PostToolUse, toolUse("mcp__github__list_pull_requests", in, body))
-				}
+			in := (<-asked).Input
+			page, _ := in["page"].(int)
+			if page == 0 {
+				page = 1
 			}
-			time.Sleep(time.Millisecond)
+			if body, ok := pages[float64(page)]; ok {
+				delete(pages, float64(page))
+				_ = ix.Hear(github.PostToolUse, toolUse("mcp__github__list_pull_requests", in, body))
+			}
 		}
 	}()
 	r, err := ix.Call("list", "pulls", "alice", "demo", "all")
