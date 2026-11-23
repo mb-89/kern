@@ -256,8 +256,13 @@ func (ix *Index) CallContext(ctx context.Context, command string, say func(line 
 		}
 		answers := make([]any, 0, len(r.Requests))
 		for i, a := range r.Requests {
-			t := in.req[a.Port]
-			ans, err := serve(ctx, ix.insts[t.inst].comp, t.verb, a.Value)
+			t, err := ix.bound(in, a.Port)
+			if err != nil {
+				err = fmt.Errorf("index: %s: request %d of %d: %w", command, i+1, len(r.Requests), err)
+				r.Stopped(err.Error())
+				return done, err
+			}
+			ans, err := ix.serveAt(ctx, t, a.Value, 0)
 			if err != nil {
 				err = fmt.Errorf("index: %s: request %d of %d, %s.%s to %s.%s, failed: %w", command, i+1, len(r.Requests), in.name, a.Port, t.inst, t.verb, err)
 				r.Stopped(err.Error())
@@ -283,6 +288,44 @@ func given(ctx context.Context) error {
 		return nil
 	}
 	return fmt.Errorf("index: the call is given up: %w", context.Cause(ctx))
+}
+
+// maxAsks is how deep verbs ask within asks in one call (RequestPort.Within):
+// past it, the asks are a cycle of verbs, and the deepest is refused.
+const maxAsks = 16
+
+// bound is the verb in's request port is bound to; an optional port the
+// wiring leaves unbound is refused, naming the wire that binds it.
+func (ix *Index) bound(in *instance, port string) (target, error) {
+	t, ok := in.req[port]
+	if !ok {
+		return target{}, fmt.Errorf("request port %s.%s is bound to nothing: the wiring binds it, %q = \"<instance>.<verb>\"", in.name, port, in.name+"."+port)
+	}
+	return t, nil
+}
+
+// serveAt hands one request to the verb t, depth asks deep, with a ctx
+// through which the verb asks its own component's request ports
+// (RequestPort.Within) as the wiring binds them.
+func (ix *Index) serveAt(ctx context.Context, t target, req any, depth int) (any, error) {
+	in := ix.insts[t.inst]
+	vctx := context.WithValue(ctx, askerKey{}, asker(func(port string, v any) (any, error) {
+		r, ok := in.comp.requests[port]
+		switch {
+		case !ok:
+			return nil, fmt.Errorf("component %s has no request port %q", in.comp.name, port)
+		case !Fits(v, r.Req):
+			return nil, fmt.Errorf("component %s: request port %s sends %s, not %T", in.comp.name, port, r.Req, v)
+		case depth+1 >= maxAsks:
+			return nil, fmt.Errorf("request port %s.%s: asks within asks %d deep, a cycle of verbs", in.name, port, maxAsks)
+		}
+		next, err := ix.bound(in, port)
+		if err != nil {
+			return nil, err
+		}
+		return ix.serveAt(ctx, next, v, depth+1)
+	}))
+	return serve(vctx, in.comp, t.verb, req)
 }
 
 // serve hands one request to its verb with the call's ctx, so a verb that
