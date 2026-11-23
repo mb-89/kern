@@ -227,6 +227,8 @@ se-name	python/kern/nats.py	SE
 se-name	se.toml	SE
 se-name	template/.github/workflows/check.yml	SE
 se-name	template/README.md	SE
+se-name	template/RUNME.ps1	SE
+se-name	template/RUNME.sh	SE
 se-name	template/go.mod	SE
 se-name	template/se.toml	SE
 se-name	tools/release/main.go	SE
