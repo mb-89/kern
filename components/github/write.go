@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"kern/filled"
 	"kern/host"
 	"kern/index"
 )
@@ -26,25 +27,23 @@ const (
 	WrittenShape      = "github.written"
 )
 
-// NewIssue is what the verb issue-create asks: the repository, a template's
-// name and its fields, and the labels; never a title or a body, which the
-// template renders from the fields.
+// NewIssue is what the verb issue-create asks: the repository, the labels and
+// a filled template, as the application's template component made it; never
+// a title or a body, which the template component answers for it.
 type NewIssue struct {
-	Owner    string         `json:"owner"`
-	Repo     string         `json:"repo"`
-	Template string         `json:"template"`
-	Fields   map[string]any `json:"fields"`
-	Labels   []string       `json:"labels,omitempty"`
+	Owner  string   `json:"owner"`
+	Repo   string   `json:"repo"`
+	Labels []string `json:"labels,omitempty"`
+	Filled any      `json:"filled"`
 }
 
-// NewComment is what the verb issue-comment asks: the issue or pull request,
-// a template's name and its fields; never a body.
+// NewComment is what the verb issue-comment asks: the issue or pull request
+// and a filled template; never a body.
 type NewComment struct {
-	Owner    string         `json:"owner"`
-	Repo     string         `json:"repo"`
-	Number   int            `json:"number"`
-	Template string         `json:"template"`
-	Fields   map[string]any `json:"fields"`
+	Owner  string `json:"owner"`
+	Repo   string `json:"repo"`
+	Number int    `json:"number"`
+	Filled any    `json:"filled"`
 }
 
 // Written is what a write verb answers: the issue it filed or commented on,
@@ -60,16 +59,20 @@ type Written struct {
 }
 
 // The commands' request ports, bound to the component's own write verbs
-// where the wiring binds them to nothing (index.RequestPort.Self).
+// where the wiring binds them to nothing (index.RequestPort.Self), and the
+// port the write verbs ask whether the application's template component
+// accepts the filled template (package filled), which the application's
+// wiring binds to that component's verb accept.
 var (
 	createPort  = index.JSONRequest("file-issue", "Files an issue through the verb issue-create.", IssueCreateShape, WrittenShape).Self("issue-create")
 	commentPort = index.JSONRequest("file-comment", "Comments on an issue through the verb issue-comment.", IssueCommentShape, WrittenShape).Self("issue-comment")
+	acceptPort  = filled.NewPort("Asks the application's template component whether it accepts the filled template a write was handed, and answers its title and document; the wiring binds it to that component's verb accept.").Optional()
 )
 
 // writeParts are the write verbs and the writing commands that ask them.
 func (g *GitHub) writeParts() []index.Part {
 	return []index.Part{
-		index.JSONVerb("issue-create", "Files an issue from a filled template: checks the fields against the template, renders the title and the body from them, and files it; a fill the template refuses reaches GitHub not at all.", IssueCreateShape, WrittenShape,
+		index.JSONVerb("issue-create", "Files an issue from a filled template: asks the application's template component whether it accepts it, and files the title and the document it answers as they stand; a value it refuses reaches GitHub not at all.", IssueCreateShape, WrittenShape,
 			func(ctx context.Context, req map[string]any) (Written, error) {
 				var a NewIssue
 				if err := strict(req, &a); err != nil {
@@ -77,7 +80,7 @@ func (g *GitHub) writeParts() []index.Part {
 				}
 				return g.createIssue(ctx, a)
 			}),
-		index.JSONVerb("issue-comment", "Comments on an issue or a pull request from a filled template: checks the fields against the template, renders the body from them, and posts it; a fill the template refuses reaches GitHub not at all.", IssueCommentShape, WrittenShape,
+		index.JSONVerb("issue-comment", "Comments on an issue or a pull request from a filled template: asks the application's template component whether it accepts it, and posts the document it answers as it stands; a value it refuses reaches GitHub not at all.", IssueCommentShape, WrittenShape,
 			func(ctx context.Context, req map[string]any) (Written, error) {
 				var a NewComment
 				if err := strict(req, &a); err != nil {
@@ -85,21 +88,21 @@ func (g *GitHub) writeParts() []index.Part {
 				}
 				return g.comment(ctx, a)
 			}),
-		createPort, commentPort,
+		createPort, commentPort, acceptPort,
 		index.Command(index.CommandDecl{
-			Name: "github issue-create", Usage: "github issue-create --repo OWNER/REPO --template NAME --fields JSON [--label LABEL]...",
+			Name: "github issue-create", Usage: "github issue-create --repo OWNER/REPO --filled JSON [--label LABEL]...",
 			Summary: "File an issue from a filled template.", Group: "GitHub", Class: index.Batch, Writes: true,
-			Help: "Files an issue in OWNER/REPO: --fields is the template's fields as one JSON object, checked against the template NAME before anything reaches GitHub; the template renders the title and the body. A fill the template refuses answers its findings.",
-			MCP:  "Files a GitHub issue from a filled template, never free text: name the template and pass its fields as one JSON object; a fill the template refuses answers its findings, and nothing is filed.",
+			Help: "Files an issue in OWNER/REPO: --filled is the filled template as the application's template component made it, one JSON value; that component accepts it before anything reaches GitHub, and its title and document are filed as they stand. A value it refuses answers its refusal.",
+			MCP:  "Files a GitHub issue from a filled template, never free text: fill the template with the application's template component and pass its answer, as it stands, as --filled; a value it refuses answers its refusal, and nothing is filed.",
 		}, func(_ struct{}, args []string) (index.Result, error) {
-			fs, repo, template, fields := writeFlags("github issue-create")
+			fs, repo, value := writeFlags("github issue-create")
 			var labels many
 			fs.Var(&labels, "label", "a label the issue carries; repeatable")
-			a, err := parseWrite(fs, args, repo, template, fields)
+			a, err := parseWrite(fs, args, repo, value)
 			if err != nil {
 				return index.Result{}, err
 			}
-			ask := NewIssue{Owner: a.owner, Repo: a.repo, Template: *template, Fields: a.fields, Labels: labels}
+			ask := NewIssue{Owner: a.owner, Repo: a.repo, Labels: labels, Filled: a.filled}
 			return index.Result{Requests: []index.Ask{createPort.Ask(ask)}, Then: func(ans []any) (index.Result, error) {
 				var w Written
 				if err := index.Recode(ans[0], &w); err != nil {
@@ -109,18 +112,18 @@ func (g *GitHub) writeParts() []index.Part {
 			}}, nil
 		}),
 		index.Command(index.CommandDecl{
-			Name: "github issue-comment", Usage: "github issue-comment --repo OWNER/REPO --number N --template NAME --fields JSON",
+			Name: "github issue-comment", Usage: "github issue-comment --repo OWNER/REPO --number N --filled JSON",
 			Summary: "Comment on an issue from a filled template.", Group: "GitHub", Class: index.Batch, Writes: true,
-			Help: "Comments on issue or pull request N of OWNER/REPO: --fields is the template's fields as one JSON object, checked against the template NAME before anything reaches GitHub; the template renders the body. A fill the template refuses answers its findings.",
-			MCP:  "Comments on a GitHub issue or pull request from a filled template, never free text: name the template and pass its fields as one JSON object; a fill the template refuses answers its findings, and nothing is posted.",
+			Help: "Comments on issue or pull request N of OWNER/REPO: --filled is the filled template as the application's template component made it, one JSON value; that component accepts it before anything reaches GitHub, and its document is posted as it stands. A value it refuses answers its refusal.",
+			MCP:  "Comments on a GitHub issue or pull request from a filled template, never free text: fill the template with the application's template component and pass its answer, as it stands, as --filled; a value it refuses answers its refusal, and nothing is posted.",
 		}, func(_ struct{}, args []string) (index.Result, error) {
-			fs, repo, template, fields := writeFlags("github issue-comment")
+			fs, repo, value := writeFlags("github issue-comment")
 			number := fs.Int("number", 0, "the issue or pull request")
-			a, err := parseWrite(fs, args, repo, template, fields)
+			a, err := parseWrite(fs, args, repo, value)
 			if err != nil {
 				return index.Result{}, err
 			}
-			ask := NewComment{Owner: a.owner, Repo: a.repo, Number: *number, Template: *template, Fields: a.fields}
+			ask := NewComment{Owner: a.owner, Repo: a.repo, Number: *number, Filled: a.filled}
 			return index.Result{Requests: []index.Ask{commentPort.Ask(ask)}, Then: func(ans []any) (index.Result, error) {
 				var w Written
 				if err := index.Recode(ans[0], &w); err != nil {
@@ -142,7 +145,7 @@ func strict(req map[string]any, a any) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(a); err != nil {
-		return fmt.Errorf("%v: a write fills a template, its name and fields, never free text", err)
+		return fmt.Errorf("%v: a write takes a filled template, never free text", err)
 	}
 	return nil
 }
@@ -152,61 +155,70 @@ type many []string
 func (m *many) String() string     { return strings.Join(*m, ",") }
 func (m *many) Set(v string) error { *m = append(*m, v); return nil }
 
-func writeFlags(name string) (fs *flag.FlagSet, repo, template, fields *string) {
+func writeFlags(name string) (fs *flag.FlagSet, repo, value *string) {
 	fs = flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	return fs, fs.String("repo", "", "OWNER/REPO"), fs.String("template", "", "the template's name"), fs.String("fields", "", "the template's fields, one JSON object")
+	return fs, fs.String("repo", "", "OWNER/REPO"), fs.String("filled", "", "the filled template, one JSON value, as the template component made it")
 }
 
 type writeArgs struct {
 	owner, repo string
-	fields      map[string]any
+	filled      any
 }
 
-func parseWrite(fs *flag.FlagSet, args []string, repo, template, fields *string) (writeArgs, error) {
+func parseWrite(fs *flag.FlagSet, args []string, repo, value *string) (writeArgs, error) {
 	if err := fs.Parse(args); err != nil {
 		return writeArgs{}, fmt.Errorf("%s: %v", fs.Name(), err)
 	}
 	if fs.NArg() > 0 {
-		return writeArgs{}, fmt.Errorf("%s takes no argument %q: a write fills a template, never free text", fs.Name(), fs.Arg(0))
+		return writeArgs{}, fmt.Errorf("%s takes no argument %q: a write takes a filled template, never free text", fs.Name(), fs.Arg(0))
 	}
 	owner, name, ok := strings.Cut(*repo, "/")
-	if !ok || owner == "" || name == "" || *template == "" {
-		return writeArgs{}, fmt.Errorf("%s names --repo OWNER/REPO and --template NAME", fs.Name())
+	if !ok || owner == "" || name == "" || *value == "" {
+		return writeArgs{}, fmt.Errorf("%s names --repo OWNER/REPO and --filled JSON", fs.Name())
 	}
-	var f map[string]any
-	if err := json.Unmarshal([]byte(*fields), &f); err != nil || f == nil {
-		return writeArgs{}, fmt.Errorf("%s: --fields is no JSON object of the template's fields: %q", fs.Name(), *fields)
+	var f any
+	if err := json.Unmarshal([]byte(*value), &f); err != nil {
+		return writeArgs{}, fmt.Errorf("%s: --filled is no JSON value, as the template component's fill answers one: %q", fs.Name(), *value)
 	}
-	return writeArgs{owner: owner, repo: name, fields: f}, nil
+	return writeArgs{owner: owner, repo: name, filled: f}, nil
 }
 
-// fill loads the template, checks the fill against it for the action and
-// renders it; a fill it refuses answers its findings, and nothing is written.
-func (g *GitHub) fill(verb, action, name string, fields map[string]any) (title, body string, err error) {
-	g.mu.Lock()
-	dir := g.templates
-	g.mu.Unlock()
-	t, err := LoadTemplate(dir, name)
+// accept asks the application's template component, on the port
+// template-accept, whether it accepts the filled template the write verb was
+// handed, and answers what it accepted: its refusal, or the port left
+// unbound, answers the verb's error, and nothing reaches GitHub. A write
+// takes no free text, so an answer that the value is free is refused too; an
+// issue needs the title the template answers.
+func (g *GitHub) accept(ctx context.Context, verb string, value any, titled bool) (filled.Accepted, error) {
+	ans, err := acceptPort.Within(ctx, filled.Request{Target: "github " + verb, Filled: value})
 	if err != nil {
-		return "", "", fmt.Errorf("github %s: %w; nothing reached GitHub", verb, err)
+		return filled.Accepted{}, fmt.Errorf("github %s: %w; nothing reached GitHub", verb, err)
 	}
-	if found := t.Check(action, fields); len(found) > 0 {
-		return "", "", fmt.Errorf("github %s: template %s refuses the fill, and nothing reached GitHub:\n- %s", verb, name, strings.Join(found, "\n- "))
+	a, err := filled.Answer(ans)
+	if err != nil {
+		return filled.Accepted{}, fmt.Errorf("github %s: %w; nothing reached GitHub", verb, err)
 	}
-	title, body = t.Render(fields)
-	return title, body, nil
+	switch {
+	case a.Free || a.Document == "":
+		return filled.Accepted{}, fmt.Errorf("github %s: the template component accepts no filled template, and a write takes no free text: fill a template with it; nothing reached GitHub", verb)
+	case titled && (a.Title == nil || strings.TrimSpace(*a.Title) == ""):
+		return filled.Accepted{}, fmt.Errorf("github %s: the filled template of %s has no title, which an issue needs: fill a template that takes one; nothing reached GitHub", verb, a.Template)
+	}
+	return a, nil
 }
 
-// createIssue files an issue from a filled template, through the backend.
+// createIssue files an issue from a filled template the template component
+// accepts, its title and document as they stand, through the backend.
 func (g *GitHub) createIssue(ctx context.Context, a NewIssue) (Written, error) {
 	if a.Owner == "" || a.Repo == "" {
 		return Written{}, fmt.Errorf("github issue-create: a write names the owner and the repository, not %+v", a)
 	}
-	title, body, err := g.fill("issue-create", IssueCreate, a.Template, a.Fields)
+	accepted, err := g.accept(ctx, "issue-create", a.Filled, true)
 	if err != nil {
 		return Written{}, err
 	}
+	title, body := *accepted.Title, accepted.Document
 	g.mu.Lock()
 	backend, rest := g.backend, g.rest
 	g.mu.Unlock()
@@ -227,7 +239,7 @@ func (g *GitHub) createIssue(ctx context.Context, a NewIssue) (Written, error) {
 		if len(a.Labels) > 0 {
 			input["labels"] = toAny(a.Labels)
 		}
-		s, err := g.step(ctx, StepAsk{Tool: "issue_write", Input: input, Note: fmt.Sprintf("file the issue %q in %s/%s, from template %s", title, a.Owner, a.Repo, a.Template)})
+		s, err := g.step(ctx, StepAsk{Tool: "issue_write", Input: input, Note: fmt.Sprintf("file the issue %q in %s/%s, from template %s", title, a.Owner, a.Repo, accepted.Template)})
 		if err != nil {
 			return Written{}, fmt.Errorf("github issue-create: %w", err)
 		}
@@ -240,15 +252,17 @@ func (g *GitHub) createIssue(ctx context.Context, a NewIssue) (Written, error) {
 	return w, nil
 }
 
-// comment posts a comment from a filled template, through the backend.
+// comment posts a comment from a filled template the template component
+// accepts, its document as it stands, through the backend.
 func (g *GitHub) comment(ctx context.Context, a NewComment) (Written, error) {
 	if a.Owner == "" || a.Repo == "" || a.Number <= 0 {
 		return Written{}, fmt.Errorf("github issue-comment: a write names the owner, the repository and a number above 0, not %+v", a)
 	}
-	_, body, err := g.fill("issue-comment", CommentCreate, a.Template, a.Fields)
+	accepted, err := g.accept(ctx, "issue-comment", a.Filled, false)
 	if err != nil {
 		return Written{}, err
 	}
+	body := accepted.Document
 	g.mu.Lock()
 	backend, rest := g.backend, g.rest
 	g.mu.Unlock()
@@ -262,7 +276,7 @@ func (g *GitHub) comment(ctx context.Context, a NewComment) (Written, error) {
 		w.Data = data
 	case Relay:
 		input := map[string]any{"owner": a.Owner, "repo": a.Repo, "issue_number": a.Number, "body": body}
-		s, err := g.step(ctx, StepAsk{Tool: "add_issue_comment", Input: input, Note: fmt.Sprintf("comment on %s/%s#%d, from template %s", a.Owner, a.Repo, a.Number, a.Template)})
+		s, err := g.step(ctx, StepAsk{Tool: "add_issue_comment", Input: input, Note: fmt.Sprintf("comment on %s/%s#%d, from template %s", a.Owner, a.Repo, a.Number, accepted.Template)})
 		if err != nil {
 			return Written{}, fmt.Errorf("github issue-comment: %w", err)
 		}

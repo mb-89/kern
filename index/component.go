@@ -137,6 +137,9 @@ type RequestDecl struct {
 	// to where the wiring binds it to nothing: an I/O component's command
 	// asks its own verb through the core, as any command asks one.
 	Self string
+	// Optional lets the wiring leave the port bound to nothing: the index
+	// starts, and an ask on it is refused, naming the wire that binds it.
+	Optional bool
 }
 
 // VerbDecl is a verb an I/O component accepts: the request it takes and the answer it gives.
@@ -667,8 +670,46 @@ func (r *RequestPort[Req, Ans]) Self(verb string) *RequestPort[Req, Ans] {
 	return r
 }
 
+// Optional lets the wiring leave the port bound to nothing
+// (RequestDecl.Optional): the index starts without the wire, and an ask on
+// the port is refused, naming the wire that binds it.
+func (r *RequestPort[Req, Ans]) Optional() *RequestPort[Req, Ans] {
+	r.decl.Optional = true
+	return r
+}
+
 // Ask is a request of v on the port.
 func (r *RequestPort[Req, Ans]) Ask(v Req) Ask { return Ask{Port: r.decl.Port, Value: v} }
+
+// Within asks v on the port while a verb of its component serves a request,
+// ctx being that verb's: the core delivers it to the verb the wiring binds,
+// as it delivers a command's Ask, and answers that verb's answer or refusal.
+// A verb so asks another component before it reaches its own outside thing,
+// as the GitHub component asks the application's template component whether
+// it accepts a filled template. Outside a call of the core, as where a test
+// serves the verb itself, the ask is refused.
+func (r *RequestPort[Req, Ans]) Within(ctx context.Context, v Req) (Ans, error) {
+	var zero Ans
+	ask, _ := ctx.Value(askerKey{}).(asker)
+	if ask == nil {
+		return zero, fmt.Errorf("request port %s is asked outside a call of the core: a verb asks one only while the core serves it", r.decl.Port)
+	}
+	a, err := ask(r.decl.Port, v)
+	if err != nil {
+		return zero, err
+	}
+	ans, ok := a.(Ans)
+	if !ok && a != nil {
+		return zero, fmt.Errorf("request port %s reads %s, not %T", r.decl.Port, r.decl.Ans, a)
+	}
+	return ans, nil
+}
+
+// askerKey holds, in the ctx a verb is served with, how the verb asks its
+// component's request ports (RequestPort.Within).
+type askerKey struct{}
+
+type asker func(port string, v any) (any, error)
 
 // Answer reads the answer to a request on the port, as a continuation is handed it.
 func (r *RequestPort[Req, Ans]) Answer(a any) Ans {

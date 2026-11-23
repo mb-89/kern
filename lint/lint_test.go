@@ -33,7 +33,7 @@ const note = `{
   }
 }`
 
-// good is a note as form's Render writes it.
+// good is a note as the template engine renders it.
 const good = `<!-- se:form note -->
 
 Owner: mb

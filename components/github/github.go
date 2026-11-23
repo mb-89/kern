@@ -171,7 +171,6 @@ type GitHub struct {
 	done       []answeredStep          // the numbered steps answered last, oldest first, up to keepAnswered
 	stale      map[string]string       // the PostToolUse payloads that answered an answered step, with their refusal, until their tell
 	asked      chan struct{}           // signalled each time a step is asked, which a tell waits for
-	templates  string                  // the folder the write verbs read their templates from
 	relay      clock.Relay             // the refresh's: due once refresh has passed on the clock's second
 	refreshing bool                    // a refresh runs
 }
@@ -232,7 +231,6 @@ func New(o Options) *GitHub {
 		index.Config("pace-max", "60s", "The longest rate-limit wait the token backend sits out; a longer one fails the read."),
 		index.Config("step-wait", "60m", "The longest a step of the verb step waits for the session's tool answer; a step asks its own wait up to it."),
 		index.Config("tell-wait", "300ms", "How long the hook of a tool answer that answered a step waits for the next step to be asked, so it tells that one."),
-		index.Config("templates", ".se/templates", "The folder the write verbs read each template from, <name>.json, as the application generates it; relative to the checkout."),
 		issuesOut, pullsOut, checksOut, commentsOut, issueListsOut, pullListsOut, outboxOut, backendOut,
 		index.Inlet(g.start),
 		index.Reacts(g.second),
@@ -351,7 +349,6 @@ func (g *GitHub) start(instance string, read index.Reader, commit index.Commit) 
 	}
 	g.instance, g.commit, g.backend, g.fresh, g.wait = instance, commit, backend, refresh, wait
 	g.stepWait, g.tellWait = stepWait, tellWait
-	g.templates = str("templates")
 	if backend == Token {
 		g.rest = &rest{api: strings.TrimSuffix(str("api"), "/"), token: token, client: g.o.Client, sleep: g.o.Sleep, clock: g.o.Clock, paceMax: paceMax, cache: map[string]cached{}}
 	}

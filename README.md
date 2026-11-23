@@ -22,8 +22,8 @@ named in the design's plan.
 | `mcp/` | the MCP door, `<name> mcp`: the catalog's read-only and writing commands as tools over stdio ([The MCP door](#the-mcp-door)) | |
 | `lint/` | the one checker of managed files: each file's template or schema, links that reach nothing, names over their caps; the language server, `<name> lint` and the tests ask it ([Language server](#language-server)) | quackitect v5 `Sweep` |
 | `lsp/` | the language server, `<name> lsp`: the checker's findings as diagnostics over stdio, which an editor starts ([Language server](#language-server)) | quackitect v5 `spec/design_output/lsp.md` |
-| `filled/` | the gate of every templated target in kern: the request port `template-accept` and its shapes `template.accept` → `template.accepted`, which an application's wiring binds to its template component's verb `accept` ([Files](#files)) | SE's `components/template` `accept` |
-| `form/` | the templates: `<name>.json`, its fields' shapes and schema, which the GitHub component fills and renders and the checker holds a rendered file to | `components/github/template.go` |
+| `filled/` | the gate of every templated target in kern: the request port `template-accept` and its shapes `template.accept` → `template.accepted`, which an application's wiring binds to its template component's verb `accept` ([Filled templates](#filled-templates), [Files](#files)) | SE's `components/template` `accept` |
+| `form/` | the templates the checker reads: `<name>.json`, its fields' shapes and schema, which the checker holds a rendered file to ([Templates](#templates)) | `components/github/template.go` |
 | `cmd/kern/` | the bare binary: `kern start`, `kern status`, `kern stop`, `kern serve`, `kern hook`, `kern lint`, `kern lsp`, carrying kern's shared components | |
 | `components/clock/` | the clock: time as names, `time` since its start 10 times a second, and `second`, `minute` and `hour` counting up, which a component reads instead of keeping a timer ([its README](components/clock/README.md)) | |
 | `components/files/` | the files component: the managed folders held in memory as names, reads and searches from the model, compare-and-swap writes, a watcher and a hash reconcile ([Files](#files), [its README](components/files/README.md)) | quackitect v4 `src/engine/indexwatch.go`, v5 `src/modules/files/watch.go` |
@@ -178,8 +178,9 @@ launcher, since its working directory need not be the checkout.
     the port to nothing.
   - The [GitHub component](components/github/README.md) serves `github_write`: its commands
     `github issue-create` and `github issue-comment`, through its verbs of those names. They take a
-    filled template, never free text, and check it against the template before anything reaches
-    GitHub ([its README](components/github/README.md#writes-filled-templates-only)).
+    filled template, never free text, which the application's template component accepts before
+    anything reaches GitHub ([Filled templates](#filled-templates),
+    [its README](components/github/README.md#writes-filled-templates-only)).
   - `components/github/door_test.go` files an issue through the door and the real core against
     the component's fake REST server.
 - **The catalog check.** `mcp.Tools` refuses a read-only or writing command without its `mcp`
@@ -209,6 +210,45 @@ notice, so it is measured and can be held.
 - **An application holds its own**: SE's `components/cmd/se/mcp_surface_test.go` compares its
   committed `testdata/tools.json` with the live list, naming the command that rewrites it, and
   logs the measure against its budget, `surfaceBudget`, which reports only while unset.
+
+## Filled templates
+
+A write that only a template may shape takes a filled template, never free text: a value the
+application's template component made and checked (SE's `components/template`, SE#1683). kern
+imports no application, so it never checks the value itself. It asks the template component,
+through a request port the application's wiring binds, whether it accepts the value, and writes
+what that component answers as it stands.
+
+- **One port definition.** Package `filled` declares it for every target: `filled.NewPort(help)`
+  is the request port `template-accept`, of the shapes `filled.RequestShape` (`template.accept`) →
+  `filled.AnswerShape` (`template.accepted`), the shapes of the template component's verb
+  `accept`. It asks `filled.Request`, `{"target", "template"?, "path"?, "filled"}`, and
+  `filled.Answer` reads `filled.Accepted`, `{"free", "template"?, "version"?, "title"?,
+  "document"?}`. The application binds each target's port to the same verb:
+
+  ```toml
+  [wires]
+  "files.template-accept" = "template.accept"
+  "github.template-accept" = "template.accept"
+  ```
+
+- **Asked by a command or a verb.** The files module's writing commands ask the port in their
+  requests. The GitHub component's write verbs ask it while they serve
+  (`index.RequestPort.Within`), so every caller passes the same gate: an agent host through the
+  MCP door, a script through a command, another component through the verb. The core delivers the
+  ask to the verb the wiring binds, as it delivers a command's request; outside a call of the
+  core, as where a test serves the verb itself, the ask is refused, and asks within asks end 16
+  deep, a cycle of verbs.
+- **Unbound, as each target says.** A refusal of `accept` is the write's error, naming the
+  template to fill, and nothing is written. Where the wiring binds the port to nothing, each
+  target decides:
+  - The [files module](components/files/README.md#template-only-paths) binds it to a verb of its
+    own, `filled.FreeVerb`, which answers every path free, so an application without templates
+    writes as it did.
+  - The [GitHub component](components/github/README.md#writes-filled-templates-only)'s
+    `issue-create` and `issue-comment` declare it optional (`index.RequestPort.Optional`): a
+    wiring without a template component starts, and each write is refused, naming the wire that
+    binds it, `"github.template-accept" = "<instance>.<verb>"`. GitHub takes no free text.
 
 ## A component in Python
 
@@ -388,6 +428,29 @@ and the battery all asked, so there was no second road.
   on the bus (`val.<name>`).
 - **Beside it**, standard servers stay for what they do well: prose (`vale-ls`) and code
   formatting (Biome). The editor runs them next to `<name> lsp`.
+
+### Templates
+
+A template is data, `<name>.json` in the templates folder the lsp component's config key
+`templates` names, relative to the checkout. The application's own template engine writes it, so
+the checker holds a rendered managed file to it without calling that engine (package `form`). It
+is no write path: a write takes a filled template ([Filled templates](#filled-templates)).
+
+- **What kern reads:** `form`, the template's name; `field_shape`, each field's shape in order;
+  `schema`, a JSON Schema 2020-12 of the fields. Other keys are read past.
+  - SE's `forms.py draft <form> --json` writes all three.
+  - Beside them, kern alone reads `markers` (the lines the body opens with), `actions` (the writes
+    the template serves, `issue.create` or `comment.create`; none names both) and `level` (its
+    headings' level, 2 by default).
+- **A field's shape:** `kind`, one of `line`, `choice`, `text`, `list`, `issue`, `checklist`,
+  `object` and `code`. Beside it: `heading`, `required`, `none_ok` (`None` fills it), `choices`,
+  `max_words`, `numbered`, `label` (a `<label>: <value>` line above the sections), `source = "title"`
+  (the issue's title, never in the body) and `lang` (a code block's).
+- **The check of a rendered file:** each heading of the template's level is a field's, in the
+  template's order, once; each field's value, read back from the lines under its heading, meets
+  its shape (a required field filled, `None` only where `none_ok` lets it stand, a choice among
+  its choices, at most `max_words` words) and its schema (`type`, `properties`, `required`,
+  `additionalProperties`, `items` and `enum`).
 
 ### In VS Code
 

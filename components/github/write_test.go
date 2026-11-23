@@ -1,133 +1,179 @@
 package github_test
 
 import (
+	"context"
 	"encoding/json"
-	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"kern/components/github"
+	"kern/filled"
 	"kern/index"
 )
 
-// note is a comment's template: a label line, then a text, a checklist, an
-// object and a code block, the last kinds a body renders.
-const note = `{
-  "form": "note",
-  "says": "A note on an issue.",
-  "actions": ["comment.create"],
-  "level": 3,
-  "field_shape": {
-    "status": {"kind": "line", "label": "Status", "required": true},
-    "text": {"kind": "text", "heading": "Note", "required": true},
-    "checks": {"kind": "checklist", "heading": "Checks"},
-    "facts": {"kind": "object", "heading": "Facts"},
-    "log": {"kind": "code", "heading": "Log", "lang": "sh"},
-    "blocked_by": {"kind": "issue", "heading": "Blocked by", "required": true, "none_ok": true}
-  },
-  "schema": {
-    "type": "object",
-    "properties": {
-      "status": {"type": "string"},
-      "text": {"type": "string"},
-      "checks": {"type": "array", "items": {"type": "object", "properties": {"done": {"type": "boolean"}, "text": {"type": "string"}}, "required": ["done", "text"], "additionalProperties": false}},
-      "facts": {"type": "array", "items": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}, "required": ["key", "value"], "additionalProperties": false}},
-      "log": {"type": "string"},
-      "blocked_by": {"type": "array", "items": {"type": "string"}}
-    },
-    "required": ["status", "text"],
-    "additionalProperties": false
-  }
-}`
+// sealed is the seal the fake template component's fill makes: a value of the
+// filled template's shape without it is free text, as a value the real
+// template component did not make is.
+const sealed = "made-by-fill"
 
-func writing(t *testing.T, o github.Options, config string, more ...*index.Component) (*github.GitHub, *index.Index) {
+// odd is a document whose every byte must reach GitHub as it stands: a marker,
+// a carriage return, trailing blanks, a tab, non-ASCII text and no final newline.
+const odd = "<!-- report -->\r\n\n## Situation\n\nThe door files.  \n\tä😀 — kept as it stands"
+
+// fillOf is a filled template of template, as the fake template component's
+// fill answers it, JSON written by its fill alone.
+func fillOf(template, title, document string) map[string]any {
+	v := map[string]any{"template": template, "document": document, "seal": sealed}
+	if title != "" {
+		v["title"] = title
+	}
+	return v
+}
+
+// acceptor is the fake of an application's template component: its verb
+// accept answers the title and the document of a filled template its fill
+// made, and refuses anything else, naming the template to fill, as SE's
+// template component does. It records each request it was asked.
+type acceptor struct {
+	mu    sync.Mutex
+	asked []filled.Request
+	// answer, where set, is what accept answers in place of the value's own.
+	answer *filled.Accepted
+}
+
+func (a *acceptor) component() *index.Component {
+	return index.Declare("template", "The application's template component, faked.", index.IO(),
+		index.JSONVerb("accept", "Accepts a filled template its fill made.", filled.RequestShape, filled.AnswerShape,
+			func(_ context.Context, req filled.Request) (filled.Accepted, error) {
+				a.mu.Lock()
+				a.asked = append(a.asked, req)
+				answer := a.answer
+				a.mu.Unlock()
+				m, _ := req.Filled.(map[string]any)
+				name, _ := m["template"].(string)
+				if m["seal"] != sealed {
+					if name == "" {
+						name = "report"
+					}
+					return filled.Accepted{}, &refusal{req.Target + " takes a filled template, not free text: fill template " + name + " with the template component's fill"}
+				}
+				if answer != nil {
+					return *answer, nil
+				}
+				out := filled.Accepted{Template: name, Version: "1", Document: m["document"].(string)}
+				if title, ok := m["title"].(string); ok {
+					out.Title = &title
+				}
+				return out, nil
+			}),
+	)
+}
+
+func (a *acceptor) requests() []filled.Request {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]filled.Request{}, a.asked...)
+}
+
+type refusal struct{ s string }
+
+func (r *refusal) Error() string { return r.s }
+
+// writing starts the component with config, beside the fake template
+// component where accept is one, its port template-accept bound to that
+// component's verb accept, and beside the writer where it is one of more.
+func writing(t *testing.T, o github.Options, config string, accept *acceptor, more ...*index.Component) (*github.GitHub, *index.Index) {
 	t.Helper()
 	g := github.New(o)
-	w, err := index.ParseWiring([]byte(`
-[instances.github]
-component = "github"
-config = { ` + config + ` }
-` + wiresOf(more)))
+	comps := append([]*index.Component{g.Component}, more...)
+	text := "[instances.github]\ncomponent = \"github\"\nconfig = { " + config + " }\n"
+	wires := "\n[wires]\n\"github.second\" = \"built-in\"\n"
+	if accept != nil {
+		comps = append(comps, accept.component())
+		text += "\n[instances.template]\ncomponent = \"template\"\n"
+		wires += "\"github.template-accept\" = \"template.accept\"\n"
+	}
+	if len(more) > 0 {
+		text += "\n[instances.writer]\ncomponent = \"writer\"\n"
+		wires += "\"writer.create\" = \"github.issue-create\"\n"
+	}
+	w, err := index.ParseWiring([]byte(text + wires))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ix, err := index.Start(w, append([]*index.Component{g.Component}, more...)...)
+	ix, err := index.Start(w, comps...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return g, ix
 }
 
-// wiresOf wires the clock's second built-in, and the writer where it is one of more.
-func wiresOf(more []*index.Component) string {
-	if len(more) == 0 {
-		return "\n[wires]\n\"github.second\" = \"built-in\"\n"
+func jsonOf(t *testing.T, v any) string {
+	t.Helper()
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return "\n[instances.writer]\ncomponent = \"writer\"\n\n[wires]\n\"github.second\" = \"built-in\"\n\"writer.create\" = \"github.issue-create\"\n"
+	return string(data)
 }
 
-// A comment is posted from a filled template: its label line, then each
-// field under its heading at the template's level, None filling the field
-// that takes it; the answer links the comment.
-func TestACommentIsPostedFromAFilledTemplate(t *testing.T) {
+// posts reads what the fake GitHub was sent: each path and its JSON payload.
+func posts(t *testing.T, f *fakeGitHub) (paths []string, sent []map[string]any) {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, p := range f.posted {
+		path, body, _ := strings.Cut(p, " ")
+		var m map[string]any
+		if err := json.Unmarshal([]byte(body), &m); err != nil {
+			t.Fatalf("GitHub was sent %q, no JSON: %v", p, err)
+		}
+		paths, sent = append(paths, path), append(sent, m)
+	}
+	return paths, sent
+}
+
+// A comment posts the document the template component accepted, byte for
+// byte: the component asks accept with its target and the value as it was
+// handed, and takes the answer as it stands.
+func TestACommentPostsTheAcceptedDocumentAsItStands(t *testing.T) {
 	t.Parallel()
 	f, srv := newFake(t)
 	f.created["/repos/alice/demo/issues/7/comments"] = `{"id": 99, "html_url": "https://github.com/alice/demo/issues/7#issuecomment-99"}`
-	dir := templates(t, map[string]string{"note": note, "report": report})
-	_, ix := writing(t, github.Options{Clock: &clock{now: nine}, Token: token("")},
-		`backend = "token", api = "`+srv.URL+`", templates = '`+filepath.ToSlash(dir)+`'`)
-	fields := `{"status": "landed", "text": "It landed.", "checks": [{"done": true, "text": "suite"}, {"done": false, "text": "release"}],
-		"facts": [{"key": "pin", "value": "v5"}], "log": "go test ./...", "blocked_by": ["None"]}`
-	r, err := ix.Call("github issue-comment", "--repo", "alice/demo", "--number", "7", "--template", "note", "--fields", fields)
+	accept := &acceptor{}
+	_, ix := writing(t, github.Options{Clock: &clock{now: nine}, Token: token("")}, `backend = "token", api = "`+srv.URL+`"`, accept)
+	value := fillOf("note", "", odd)
+	r, err := ix.Call("github issue-comment", "--repo", "alice/demo", "--number", "7", "--filled", jsonOf(t, value))
 	if err != nil || r.Text != "commented on alice/demo#7: https://github.com/alice/demo/issues/7#issuecomment-99" {
 		t.Fatalf("github issue-comment answers %q, %v, and wants the comment linked", r.Text, err)
 	}
-	f.mu.Lock()
-	posted := append([]string{}, f.posted...)
-	f.mu.Unlock()
-	var sent struct{ Body string }
-	if len(posted) == 1 {
-		path, body, _ := strings.Cut(posted[0], " ")
-		if err := json.Unmarshal([]byte(body), &sent); err != nil || path != "/repos/alice/demo/issues/7/comments" {
-			t.Fatalf("GitHub was sent %q (%v)", posted[0], err)
-		}
+	paths, sent := posts(t, f)
+	if len(sent) != 1 || paths[0] != "/repos/alice/demo/issues/7/comments" || sent[0]["body"] != odd || len(sent[0]) != 1 {
+		t.Fatalf("GitHub was sent %v %v, and wants the accepted document alone, byte for byte:\n%q", paths, sent, odd)
 	}
-	want := "Status: landed\n\n### Note\n\nIt landed.\n\n### Checks\n\n- [x] suite\n- [ ] release\n\n### Facts\n\npin: v5\n\n### Log\n\n```sh\ngo test ./...\n```\n\n### Blocked by\n\nNone\n"
-	if len(posted) != 1 || sent.Body != want {
-		t.Fatalf("GitHub was sent %q, and wants the comment the template renders:\n%s", posted, want)
-	}
-
-	// A template serves the writes its actions name.
-	_, err = ix.Call("github issue-comment", "--repo", "alice/demo", "--number", "7", "--template", "report",
-		"--fields", `{"title": "t", "situation": "s", "requirements": ["r"]}`)
-	if err == nil || !strings.Contains(err.Error(), "template report serves issue.create, not comment.create") {
-		t.Fatalf("a comment from an issue's template answers %v, and wants it refused", err)
-	}
-	// None fills only the field that takes it; an empty required field is refused.
-	_, err = ix.Call("github issue-comment", "--repo", "alice/demo", "--number", "7", "--template", "note", "--fields", `{"status": "None", "text": "t", "blocked_by": []}`)
-	if err == nil || !strings.Contains(err.Error(), "field status takes no None") || !strings.Contains(err.Error(), "field blocked_by is required") {
-		t.Fatalf("a fill with None where it may not stand and an empty required field answers %v, and wants both refused", err)
+	asked := accept.requests()
+	if len(asked) != 1 || asked[0].Target != "github issue-comment" || asked[0].Template != "" || asked[0].Path != "" || jsonOf(t, asked[0].Filled) != jsonOf(t, value) {
+		t.Fatalf("accept was asked %+v, and wants the target github issue-comment and the value as it was handed", asked)
 	}
 }
 
 // Through the relay, the write is a step of the session's own GitHub tool:
-// issue_write with method create and the rendered title and body; its answer
-// names the issue filed.
+// issue_write with method create and the accepted title and document; its
+// answer names the issue filed.
 func TestTheRelayFilesThroughTheSessionsTool(t *testing.T) {
 	t.Parallel()
-	dir := templates(t, map[string]string{"report": report})
-	g, ix := writing(t, github.Options{Clock: &clock{now: nine}, Token: noToken, Cloud: notCloud}, `step-wait = "10s", templates = '`+filepath.ToSlash(dir)+`'`)
+	g, ix := writing(t, github.Options{Clock: &clock{now: nine}, Token: noToken, Cloud: notCloud}, `step-wait = "10s"`, &acceptor{})
+	body := "<!-- report -->\n\n## Situation\n\nThe relay files.\n"
 	done := make(chan called, 1)
 	go func() {
-		r, err := ix.Call("github issue-create", "--repo", "alice/demo", "--template", "report",
-			"--fields", `{"title": "relay-files", "situation": "The relay files.", "requirements": ["File it."]}`)
+		r, err := ix.Call("github issue-create", "--repo", "alice/demo", "--filled", jsonOf(t, fillOf("report", "relay-files", body)))
 		done <- called{r, err}
 	}()
 	told := waitOutbox(t, g, "issue_write")
 	if !strings.Contains(told, `"method":"create"`) || !strings.Contains(told, `"title":"relay-files"`) || !strings.Contains(told, `file the issue "relay-files" in alice/demo, from template report`) {
-		t.Fatalf("the relay tells %q, and wants issue_write create with the rendered title", told)
+		t.Fatalf("the relay tells %q, and wants issue_write create with the accepted title", told)
 	}
-	body := "<!-- report -->\n\n## Situation\n\nThe relay files.\n\n## Requirements\n\n1. File it.\n"
 	if err := ix.Hear(github.PostToolUse, toolUse("mcp__github__issue_write",
 		map[string]any{"method": "create", "owner": "alice", "repo": "demo", "title": "relay-files", "body": body},
 		`{"id": "4021", "url": "https://github.com/alice/demo/issues/21"}`)); err != nil {
@@ -155,65 +201,113 @@ var writer = func() *index.Component {
 	)
 }()
 
-// The verb itself takes no free text: a request with a body or a title is
-// refused before anything reaches GitHub, whoever asks it.
+// The acceptance: the verb itself, whoever asks it, takes no free text. A
+// request with a body, a title, a template's name or its fields is refused
+// before the template component is asked; free text as the filled value, and
+// a value of its shape the template component's fill did not make, are
+// refused by accept, naming the template to fill, before any GitHub call. The
+// accepted title and document are filed byte for byte.
 func TestAWriteVerbTakesNoFreeText(t *testing.T) {
 	t.Parallel()
 	f, srv := newFake(t)
-	f.created["/repos/alice/demo/issues"] = `{"number": 1}`
-	dir := templates(t, map[string]string{"report": report})
-	_, ix := writing(t, github.Options{Clock: &clock{now: nine}, Token: token("")},
-		`backend = "token", api = "`+srv.URL+`", templates = '`+filepath.ToSlash(dir)+`'`, writer)
-	for _, key := range []string{"body", "title"} {
-		_, err := ix.Call("write", `{"owner": "alice", "repo": "demo", "template": "report", "fields": {"title": "t", "situation": "s", "requirements": ["r"]}, "`+key+`": "free text"}`)
+	f.created["/repos/alice/demo/issues"] = `{"number": 1, "html_url": "https://github.com/alice/demo/issues/1"}`
+	accept := &acceptor{}
+	_, ix := writing(t, github.Options{Clock: &clock{now: nine}, Token: token("")}, `backend = "token", api = "`+srv.URL+`"`, accept, writer)
+	for _, key := range []string{"body", "title", "template", "fields"} {
+		_, err := ix.Call("write", `{"owner": "alice", "repo": "demo", "filled": "free text", "`+key+`": "free text"}`)
 		if err == nil || !strings.Contains(err.Error(), `unknown field "`+key+`"`) || !strings.Contains(err.Error(), "never free text") {
 			t.Fatalf("a request with a %s answers %v, and wants it refused as free text", key, err)
 		}
 	}
-	if _, err := ix.Call("write", `{"owner": "alice", "repo": "demo", "template": "report", "fields": {"title": "t", "situation": "s", "requirements": ["r"]}}`); err != nil {
-		t.Fatalf("a filled template answers %v, and wants it filed", err)
+	if asked := accept.requests(); len(asked) != 0 {
+		t.Fatalf("accept was asked %+v, and wants a request with free text keys refused before", asked)
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if len(f.posted) != 1 {
-		t.Fatalf("GitHub was sent %q, and wants the filled template's issue alone", f.posted)
+	unsealed := fillOf("report", "t", "a body of its shape")
+	delete(unsealed, "seal")
+	for _, value := range []any{"free text", map[string]any{"title": "t", "body": "free text"}, unsealed, nil} {
+		_, err := ix.Call("write", jsonOf(t, map[string]any{"owner": "alice", "repo": "demo", "filled": value}))
+		if err == nil || !strings.Contains(err.Error(), "github issue-create takes a filled template, not free text: fill template report") || !strings.Contains(err.Error(), "nothing reached GitHub") {
+			t.Fatalf("the filled value %v answers %v, and wants accept's refusal naming the template to fill", value, err)
+		}
+	}
+	if paths, _ := posts(t, f); len(paths) != 0 {
+		t.Fatalf("GitHub was sent %v, and wants nothing: a refused value reaches it not at all", paths)
+	}
+	r, err := ix.Call("github issue-create", "--repo", "alice/demo", "--label", "work", "--filled", jsonOf(t, fillOf("report", "Title — as it stands ", odd)))
+	if err != nil || r.Text != "filed alice/demo#1: https://github.com/alice/demo/issues/1" {
+		t.Fatalf("an accepted filled template answers %q, %v, and wants it filed", r.Text, err)
+	}
+	paths, sent := posts(t, f)
+	if len(sent) != 1 || paths[0] != "/repos/alice/demo/issues" || sent[0]["title"] != "Title — as it stands " || sent[0]["body"] != odd || jsonOf(t, sent[0]["labels"]) != `["work"]` {
+		t.Fatalf("GitHub was sent %v %v, and wants the accepted title and document byte for byte, labelled work", paths, sent)
+	}
+	t.Logf("filed byte for byte: title %q, body %q", sent[0]["title"], sent[0]["body"])
+}
+
+// An answer of accept that holds no filled template's document, one that
+// names the value free, and an issue's without a title, reach GitHub not at
+// all: a write takes no free text, and an issue needs its title.
+func TestAnAcceptedAnswerWithoutADocumentOrAnIssuesTitleIsRefused(t *testing.T) {
+	t.Parallel()
+	f, srv := newFake(t)
+	empty := ""
+	for _, c := range []struct {
+		answer filled.Accepted
+		want   string
+	}{
+		{filled.Accepted{Free: true}, "the template component accepts no filled template, and a write takes no free text"},
+		{filled.Accepted{Template: "report", Title: &empty, Document: "d"}, "the filled template of report has no title, which an issue needs"},
+		{filled.Accepted{Template: "report", Document: "d"}, "the filled template of report has no title, which an issue needs"},
+		{filled.Accepted{Template: "report", Title: &empty}, "the template component accepts no filled template"},
+	} {
+		_, ix := writing(t, github.Options{Clock: &clock{now: nine}, Token: token("")}, `backend = "token", api = "`+srv.URL+`"`, &acceptor{answer: &c.answer})
+		_, err := ix.Call("github issue-create", "--repo", "alice/demo", "--filled", jsonOf(t, fillOf("report", "t", "d")))
+		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "nothing reached GitHub") {
+			t.Errorf("accept answering %+v answers %v, and wants %q", c.answer, err, c.want)
+		}
+	}
+	if paths, _ := posts(t, f); len(paths) != 0 {
+		t.Fatalf("GitHub was sent %v, and wants nothing", paths)
 	}
 }
 
-// A template is read as the engine wrote it, its fields in order, and one
-// that is broken or misnamed is refused, naming why.
-func TestATemplateIsReadOrRefused(t *testing.T) {
-	tpl, err := github.ParseTemplate([]byte(report))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var names []string
-	for _, f := range tpl.Fields {
-		names = append(names, f.Name)
-	}
-	if strings.Join(names, " ") != "title situation requirements kind" || tpl.Level != 2 {
-		t.Fatalf("the template reads fields %v at level %d, and wants them in the file's order at level 2", names, tpl.Level)
-	}
-	for text, want := range map[string]string{
-		`{"says": "x"}`: "names no form",
-		`{"form": "x", "schema": {"type": "object", "properties": {}}, "field_shape": {"a": {"kind": "prose", "heading": "A"}}}`:                         `"prose" is no kind`,
-		`{"form": "x", "schema": {"type": "object", "properties": {}}, "field_shape": {"a": {"kind": "text"}}}`:                                          "field a has no heading",
-		`{"form": "x", "schema": {"type": "object", "properties": {}}, "field_shape": {}}`:                                                               "it has no field",
-		`{"form": "x", "field_shape": {"a": {"kind": "text", "heading": "A"}}}`:                                                                          "its schema is no object with properties",
-		`{"form": "x", "actions": ["pr.merge"], "schema": {"type": "object", "properties": {}}, "field_shape": {"a": {"kind": "text", "heading": "A"}}}`: `action "pr.merge"`,
+// The acceptance: with the port template-accept unbound, the component still
+// starts, and a write is refused, naming the binding, before any GitHub call.
+func TestAWriteWithTheAcceptPortUnboundIsRefusedNamingTheBinding(t *testing.T) {
+	t.Parallel()
+	f, srv := newFake(t)
+	f.created["/repos/alice/demo/issues"] = `{"number": 1}`
+	_, ix := writing(t, github.Options{Clock: &clock{now: nine}, Token: token("")}, `backend = "token", api = "`+srv.URL+`"`, nil)
+	want := `request port github.template-accept is bound to nothing: the wiring binds it, "github.template-accept" = "<instance>.<verb>"`
+	for _, args := range [][]string{
+		{"github issue-create", "--repo", "alice/demo", "--filled", jsonOf(t, fillOf("report", "t", "d"))},
+		{"github issue-comment", "--repo", "alice/demo", "--number", "7", "--filled", jsonOf(t, fillOf("note", "", "d"))},
 	} {
-		if _, err := github.ParseTemplate([]byte(text)); err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("%s reads %v, and wants %q", text, err, want)
+		_, err := ix.Call(args[0], args[1:]...)
+		if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "nothing reached GitHub") {
+			t.Fatalf("%s with the port unbound answers %v, and wants %q", args[0], err, want)
 		}
+		t.Logf("%s refused: %v", args[0], err)
 	}
-	dir := templates(t, map[string]string{"report": report, "other": report})
-	if _, err := github.LoadTemplate(dir, "../report"); err == nil || !strings.Contains(err.Error(), "is no template name") {
-		t.Errorf("a path as a name reads %v, and wants it refused", err)
+	if paths, _ := posts(t, f); len(paths) != 0 {
+		t.Fatalf("GitHub was sent %v, and wants nothing", paths)
 	}
-	if _, err := github.LoadTemplate(dir, "other"); err == nil || !strings.Contains(err.Error(), `names itself "report"`) {
-		t.Errorf("a misnamed template reads %v, and wants it refused", err)
-	}
-	if found := tpl.Check(github.IssueCreate, map[string]any{"title": "t", "situation": strings.Repeat("word ", 21), "requirements": []any{"r"}}); strings.Join(found, ";") != "field situation has 21 words, over its 20" {
-		t.Errorf("a long field reads %v, and wants its words counted against max_words", found)
+}
+
+// A command takes the filled value as JSON, and neither free text nor a
+// missing value.
+func TestAWriteCommandTakesTheFilledValueAsJSON(t *testing.T) {
+	t.Parallel()
+	_, ix := writing(t, github.Options{Clock: &clock{now: nine}, Token: token("")}, `backend = "token", api = "http://127.0.0.1:1"`, &acceptor{})
+	for args, want := range map[string]string{
+		"--repo alice/demo":                         "names --repo OWNER/REPO and --filled JSON",
+		"--repo alice/demo --filled {not-json":      "--filled is no JSON value",
+		"--repo alice/demo --filled {} stray":       `takes no argument "stray"`,
+		"--repo alice/demo --template report":       "flag provided but not defined: -template",
+		"--repo alice/demo --fields {} --filled {}": "flag provided but not defined: -fields",
+	} {
+		if _, err := ix.Call("github issue-create", strings.Fields(args)...); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("github issue-create %s answers %v, and wants %q", args, err, want)
+		}
 	}
 }
