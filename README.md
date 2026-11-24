@@ -182,7 +182,10 @@ launcher, since its working directory need not be the checkout.
   leaves the record any call leaves. The door reaches no outside service itself.
   - An I/O component's own writing command asks its own verb the same way: a request port that
     names a verb of its component (`index.RequestPort.Self`) is bound to it where the wiring binds
-    the port to nothing.
+    the port to nothing. The port takes a name of its own, such as `file-issue` for the verb
+    `issue-create`: the catalog check refuses a component that declares a port (a request port, an
+    input or an output) and a verb of one name, naming both, since a wire to that name would bind
+    the port and never the verb.
   - The [GitHub component](components/github/README.md) serves `github_write`: its commands
     `github issue-create` and `github issue-comment`, through its verbs of those names. They take a
     filled template, never free text, which the application's template component accepts before

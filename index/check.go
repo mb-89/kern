@@ -35,6 +35,7 @@ func (b *builder) build(components []*Component) {
 		if err := c.Err(); err != nil {
 			b.fail(0, "%v", err)
 		}
+		b.clashes(c)
 	}
 	b.instances()
 	refs := b.wires()
@@ -69,6 +70,25 @@ func (b *builder) instances() {
 				}
 			}
 			b.ix.insts[wi.Name] = in
+		}
+	}
+}
+
+// clashes refuses a component that declares a port and a verb of one name:
+// a wire to that name would bind the port and never the verb, and fail far
+// from its cause naming neither, so the refusal names both.
+func (b *builder) clashes(c *Component) {
+	for _, v := range sortedKeys(c.verbs) {
+		port := ""
+		if _, ok := c.requests[v]; ok {
+			port = "request port"
+		} else if _, ok := c.outputs[v]; ok {
+			port = "output"
+		} else if _, ok := c.inputs[v]; ok {
+			port = "input"
+		}
+		if port != "" {
+			b.fail(0, "component %s declares the %s %s and the verb %s, of one name: a wire to %s would bind the %s, never the verb; rename one of them", c.Name(), port, v, v, v, port)
 		}
 	}
 }
