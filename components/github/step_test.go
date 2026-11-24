@@ -92,7 +92,7 @@ component = "stepper"
 
 func startedSteps(t *testing.T, o github.Options, config string) (*github.GitHub, *index.Index) {
 	t.Helper()
-	g := github.New(o)
+	g := github.New(hermetic(o))
 	ix, err := index.Start(stepWiring(t, config), g.Component, stepper)
 	if err != nil {
 		t.Fatal(err)
@@ -341,7 +341,7 @@ func TestTheTellOfAnAnswerWaitsForTheNextAskNotAnEarlierOne(t *testing.T) {
 // prints the next step as the host's hook JSON, which hands it the agent.
 func TestAHookPrintsTheRelaysStepsAsContext(t *testing.T) {
 	t.Parallel()
-	g := github.New(github.Options{Clock: &clock{now: nine}, Token: noToken})
+	g := github.New(github.Options{Proxy: noProxy, Clock: &clock{now: nine}, Token: noToken})
 	c, err := host.Serve(host.Options{Root: t.TempDir(), Wiring: stepWiring(t, `tell-wait = "0s"`), Components: []*index.Component{g.Component, stepper}})
 	if err != nil {
 		t.Fatal(err)

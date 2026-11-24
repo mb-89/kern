@@ -1,11 +1,14 @@
 // Package github is kern's GitHub component: the one I/O component that
 // reaches GitHub, so every other component reads GitHub through its verbs.
-// It names no application. Its two backends are chosen at start:
+// It names no application. Its three backends are chosen at start:
 //
 //   - token, where a token is found (GH_TOKEN, GITHUB_TOKEN, else `gh auth
 //     token`): GitHub's REST API, in process, with ETags, a refresh of every
 //     snapshot it holds, and pacing on 403 and 429;
-//   - relay, where none is, or in a cloud session: a read goes out as an entry of the family outbox,
+//   - proxy, where no token is usable, or in a cloud session, and GET
+//     /rate_limit through the environment's HTTPS proxy answers 200 without
+//     one: REST in process as on token, the proxy adding the credentials;
+//   - relay, where neither is: a read goes out as an entry of the family outbox,
 //     the session's own GitHub tool runs it, and the PostToolUse hook hands
 //     the tool's answer back, which the component matches to the entry.
 //
@@ -20,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -38,6 +42,7 @@ const Name = "github"
 const (
 	Auto  = "auto"
 	Token = "token"
+	Proxy = "proxy"
 	Relay = "relay"
 )
 
@@ -134,15 +139,21 @@ type Options struct {
 	Clock host.Clock
 	// Token answers the token, or "" where none is found.
 	Token func() (string, error)
-	// Client is the token backend's HTTP client.
+	// Client is the REST client of the token and proxy backends: one that
+	// sends through Proxy where none is given.
 	Client *http.Client
+	// Proxy is the environment's HTTPS proxy for a request, nil where it
+	// names none: http.ProxyFromEnvironment where none is given. The proxy
+	// backend is probed only where it names one for the probe.
+	Proxy func(*http.Request) (*url.URL, error)
 	// Sleep waits out a rate limit: a wait on Clock where none is given.
 	Sleep func(time.Duration)
 	// Go runs the refresh the clock's second makes due, so a slow GitHub
 	// never holds the clock: a goroutine of its own where none is given.
 	Go func(fn func())
 	// Cloud says whether the core runs in a cloud session, where no token
-	// reaches code and auto takes the relay: CLAUDE_CODE_REMOTE=true.
+	// reaches code and auto takes the proxy, else the relay:
+	// CLAUDE_CODE_REMOTE=true.
 	Cloud func() bool
 }
 
@@ -156,10 +167,10 @@ type GitHub struct {
 	instance   string
 	commit     index.Commit
 	backend    string
-	rest       *rest
+	rest       *rest // the token's or the proxy's REST client; nil on the relay
 	fresh      time.Duration
 	wait       time.Duration
-	held       map[string]func() // the reads the token backend refreshes, by outbox key
+	held       map[string]func() // the reads the REST backends refresh, by outbox key
 	waiting    map[string][]chan any
 	outbox     map[string]Step   // the relay's open steps, by outbox key
 	pages      map[string]*pages // the relay's paged reads under way, by outbox key
@@ -185,7 +196,7 @@ var (
 	issueListsOut = index.Family("issue-lists", List{}, "Each list of a repository's issues read, every page, at <owner>.<repo>.<state>[.<label>...], with the time it was read.")
 	pullListsOut  = index.Family("pull-lists", List{}, "Each list of a repository's pull requests read, every page, at <owner>.<repo>.<state>, with the time it was read.")
 	outboxOut     = index.Family("outbox", Step{}, "The relay's reads waiting for the session's GitHub tool, at <verb>.<key>: the next page's call where a read is paged.")
-	backendOut    = index.Output("backend", "", "The backend chosen at start: token or relay.")
+	backendOut    = index.Output("backend", "", "The backend chosen at start: token, proxy or relay.")
 )
 
 func (k kind) out() *index.FamilyPort[Snapshot] {
@@ -208,8 +219,13 @@ func New(o Options) *GitHub {
 	if o.Token == nil {
 		o.Token = FindToken
 	}
+	if o.Proxy == nil {
+		o.Proxy = http.ProxyFromEnvironment
+	}
 	if o.Client == nil {
-		o.Client = &http.Client{} // each request's limit is RequestWait, on Clock
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.Proxy = o.Proxy
+		o.Client = &http.Client{Transport: tr} // each request's limit is RequestWait, on Clock
 	}
 	if o.Sleep == nil {
 		clk := o.Clock
@@ -225,11 +241,11 @@ func New(o Options) *GitHub {
 		answered: map[string]uint64{}, stale: map[string]string{}, steps: map[string]*waitingStep{}, nextAsk: make(chan struct{})}
 	parts := []index.Part{
 		index.IO(), index.Forbids(Forbidden),
-		index.Config("backend", Auto, "auto, token or relay: auto takes the relay in a cloud session, else the token where one is found, else the relay."),
-		index.Config("api", "https://api.github.com", "The REST API the token backend reads."),
-		index.Config("refresh", "2m", "How often the token backend reads each snapshot it holds again, with its ETag, counted on the clock's second it reads; 0s reads none again. The relay answers a snapshot younger than it without asking."),
+		index.Config("backend", Auto, "auto, token, proxy or relay: auto takes the token where one is found outside a cloud session, else the proxy where GET /rate_limit through the environment's HTTPS proxy answers 200 without a token, else the relay."),
+		index.Config("api", "https://api.github.com", "The REST API the token and proxy backends read."),
+		index.Config("refresh", "2m", "How often the token and proxy backends read each snapshot it holds again, with its ETag, counted on the clock's second it reads; 0s reads none again. The relay answers a snapshot younger than it without asking."),
 		index.Config("relay-wait", "0s", "How long a relay read waits for the session's tool answer before it fails, naming the outbox step."),
-		index.Config("pace-max", "60s", "The longest rate-limit wait the token backend sits out; a longer one fails the read."),
+		index.Config("pace-max", "60s", "The longest rate-limit wait the token and proxy backends sit out; a longer one fails the read."),
 		index.Config("step-wait", "60m", "The longest a step of the verb step waits for the session's tool answer; a step asks its own wait up to it."),
 		index.Config("tell-wait", "300ms", "How long the hook of a tool answer that answered a step waits for the next step to be asked, so it tells that one."),
 		issuesOut, pullsOut, checksOut, commentsOut, issueListsOut, pullListsOut, outboxOut, backendOut,
@@ -254,7 +270,7 @@ func New(o Options) *GitHub {
 			return g.list(l, r)
 		}))
 	}
-	g.Component = index.Declare(Name, "Reaches GitHub, with a token or through the session's GitHub tools, and keeps what it reads as snapshots.", parts...)
+	g.Component = index.Declare(Name, "Reaches GitHub, with a token, through the environment's proxy or through the session's GitHub tools, and keeps what it reads as snapshots.", parts...)
 	return g
 }
 
@@ -291,7 +307,7 @@ func FindToken() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// start chooses the backend; the token's refresh runs on the clock's second.
+// start chooses the backend; the REST backends' refresh runs on the clock's second.
 func (g *GitHub) start(instance string, read index.Reader, commit index.Commit) error {
 	str := func(key string) string { v, _ := read(index.ConfigPrefix + key).(string); return v }
 	dur := func(key string) (time.Duration, error) {
@@ -321,27 +337,36 @@ func (g *GitHub) start(instance string, read index.Reader, commit index.Commit) 
 	if err != nil {
 		return err
 	}
-	backend := str("backend")
+	backend, api := str("backend"), strings.TrimSuffix(str("api"), "/")
 	var token string
-	if backend == Auto && g.o.Cloud() {
-		backend = Relay // a cloud session's GH_TOKEN is the proxy's stand-in, which code cannot use
-	}
 	switch backend {
 	case Auto, Token:
+		if backend == Auto && g.o.Cloud() {
+			break // a cloud session's GH_TOKEN is the proxy's stand-in, which code cannot use
+		}
 		if token, err = g.o.Token(); err != nil {
 			return fmt.Errorf("the token: %w", err)
 		}
-		switch {
-		case token != "":
-			backend = Token
-		case backend == Token:
+		if token == "" && backend == Token {
 			return errors.New("config backend is token, and no token is found: set GH_TOKEN, or log gh in")
+		}
+	case Proxy, Relay:
+	default:
+		return fmt.Errorf("config backend: %q is none of auto, token, proxy and relay", backend)
+	}
+	switch {
+	case token != "":
+		backend = Token
+	case backend == Auto || backend == Proxy:
+		why := g.probe(api)
+		switch {
+		case why == "":
+			backend = Proxy
+		case backend == Proxy:
+			return fmt.Errorf("config backend is proxy, and %s", why)
 		default:
 			backend = Relay
 		}
-	case Relay:
-	default:
-		return fmt.Errorf("config backend: %q is none of auto, token and relay", backend)
 	}
 	g.mu.Lock()
 	if g.instance != "" {
@@ -350,8 +375,8 @@ func (g *GitHub) start(instance string, read index.Reader, commit index.Commit) 
 	}
 	g.instance, g.commit, g.backend, g.fresh, g.wait = instance, commit, backend, refresh, wait
 	g.stepWait, g.tellWait = stepWait, tellWait
-	if backend == Token {
-		g.rest = &rest{api: strings.TrimSuffix(str("api"), "/"), token: token, client: g.o.Client, sleep: g.o.Sleep, clock: g.o.Clock, paceMax: paceMax, cache: map[string]cached{}}
+	if backend == Token || backend == Proxy {
+		g.rest = &rest{api: api, via: backend, token: token, client: g.o.Client, sleep: g.o.Sleep, clock: g.o.Clock, paceMax: paceMax, cache: map[string]cached{}}
 	}
 	g.mu.Unlock()
 	if err := commit(backendOut.Set(backend)); err != nil {
@@ -363,20 +388,20 @@ func (g *GitHub) start(instance string, read index.Reader, commit index.Commit) 
 // second is the component's reaction to the clock's second, a count that
 // counts up (components/clock): its relay returns at once until refresh, in
 // whole seconds and at least one, has passed in counts since the last
-// refresh, and then the token backend's refresh runs, on its own, unless the
+// refresh, and then the REST backend's refresh runs, on its own, unless the
 // last one still runs. A wiring that leaves second built-in reads 0 for good,
 // and refreshes nothing.
 func (g *GitHub) second(_ string, in struct {
 	Second int `index:"second"`
 }) {
 	g.mu.Lock()
-	backend, refresh := g.backend, g.fresh
+	rest, refresh := g.rest, g.fresh
 	g.mu.Unlock()
 	every := 0
 	if refresh > 0 {
 		every = max(1, int(refresh/time.Second))
 	}
-	if backend != Token || !g.relay.Due(in.Second, every) {
+	if rest == nil || !g.relay.Due(in.Second, every) {
 		return
 	}
 	g.mu.Lock()
@@ -403,7 +428,7 @@ func (g *GitHub) read(k kind, r Ref) (Snapshot, error) {
 	backend, rest := g.backend, g.rest
 	g.mu.Unlock()
 	switch backend {
-	case Token:
+	case Token, Proxy:
 		return g.readToken(rest, k, r)
 	case Relay:
 		v, err := g.ask(k.verb, Key(r), outboxKey(k, r), stepOf(k, r, g.o.Clock.Now()))
@@ -413,13 +438,14 @@ func (g *GitHub) read(k kind, r Ref) (Snapshot, error) {
 	return Snapshot{}, fmt.Errorf("github %s: the component has not started", k.verb)
 }
 
-// readToken reads through REST, writes the snapshot and holds it for the refresh.
+// readToken reads through REST, with the token or through the proxy, writes
+// the snapshot and holds it for the refresh.
 func (g *GitHub) readToken(rest *rest, k kind, r Ref) (Snapshot, error) {
 	data, err := rest.read(k, r)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("github %s %s: %w", k.verb, Key(r), err)
 	}
-	s := Snapshot{Repo: repoOf(r.Owner, r.Repo), Number: r.Number, Read: g.o.Clock.Now().UTC(), Via: Token, Data: data}
+	s := Snapshot{Repo: repoOf(r.Owner, r.Repo), Number: r.Number, Read: g.o.Clock.Now().UTC(), Via: rest.via, Data: data}
 	ob := outboxKey(k, r)
 	g.mu.Lock()
 	g.held[ob] = func() { _, _ = g.readToken(rest, k, r) }
@@ -427,7 +453,7 @@ func (g *GitHub) readToken(rest *rest, k kind, r Ref) (Snapshot, error) {
 	return s, g.land(ob, k.out().At(Key(r), s), s)
 }
 
-// Refresh reads every snapshot and list the token backend holds again, each
+// Refresh reads every snapshot and list the REST backend holds again, each
 // page with its ETag, so an unchanged one costs no quota; it is what the
 // refresh runs.
 func (g *GitHub) Refresh() {

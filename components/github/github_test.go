@@ -297,7 +297,7 @@ func (f *fakeGitHub) log() ([]string, []int) {
 // started starts an index with a component made of o and the reader.
 func started(t *testing.T, o github.Options, w index.Wiring) (*github.GitHub, *index.Index) {
 	t.Helper()
-	g := github.New(o)
+	g := github.New(hermetic(o))
 	ix, err := index.Start(w, g.Component, reader)
 	if err != nil {
 		t.Fatal(err)
@@ -383,7 +383,7 @@ func TestTheRefreshReadsEverySnapshotAgain(t *testing.T) {
 	f, srv := newFake(t)
 	clk := &clock{now: nine}
 	b := newBeat()
-	g := github.New(github.Options{Clock: clk, Token: token(""), Cloud: notCloud, Go: func(fn func()) { fn() }})
+	g := github.New(github.Options{Proxy: noProxy, Clock: clk, Token: token(""), Cloud: notCloud, Go: func(fn func()) { fn() }})
 	ix, err := index.Start(beating(t, wiringSrc(fmt.Sprintf(`api = %q`, srv.URL))), g.Component, reader, b.component)
 	if err != nil {
 		t.Fatal(err)
@@ -421,7 +421,7 @@ func TestNoSecondOrNoRefreshRefreshesNothing(t *testing.T) {
 	t.Parallel()
 	f, srv := newFake(t)
 	b := newBeat()
-	g := github.New(github.Options{Clock: &clock{now: nine}, Token: token(""), Cloud: notCloud, Go: func(fn func()) { fn() }})
+	g := github.New(github.Options{Proxy: noProxy, Clock: &clock{now: nine}, Token: token(""), Cloud: notCloud, Go: func(fn func()) { fn() }})
 	ix, err := index.Start(beating(t, wiringSrc(fmt.Sprintf(`api = %q, refresh = "0s"`, srv.URL))), g.Component, reader, b.component)
 	if err != nil {
 		t.Fatal(err)
@@ -509,7 +509,7 @@ func TestAutoTakesTheRelayInACloudSession(t *testing.T) {
 // A start that asks for the token where none is found is refused.
 func TestTheTokenBackendWithoutATokenIsRefused(t *testing.T) {
 	t.Parallel()
-	_, err := index.Start(wiring(t, `backend = "token"`), github.New(github.Options{Token: noToken}).Component, reader)
+	_, err := index.Start(wiring(t, `backend = "token"`), github.New(github.Options{Proxy: noProxy, Token: noToken}).Component, reader)
 	if err == nil || !strings.Contains(err.Error(), "no token is found") {
 		t.Fatalf("the start answers %v, and wants it refused: no token is found", err)
 	}
@@ -683,7 +683,7 @@ enabled = false
 // its snapshot name, which a client reads with its read time.
 func TestAHookPostLandsASnapshotInTheCore(t *testing.T) {
 	t.Parallel()
-	g := github.New(github.Options{Clock: &clock{now: nine}, Token: noToken})
+	g := github.New(github.Options{Proxy: noProxy, Clock: &clock{now: nine}, Token: noToken})
 	w, err := index.ParseWiring([]byte(`
 [instances.github]
 component = "github"

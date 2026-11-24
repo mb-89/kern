@@ -85,7 +85,7 @@ func (r *refusal) Error() string { return r.s }
 // component's verb accept, and beside the writer where it is one of more.
 func writing(t *testing.T, o github.Options, config string, accept *acceptor, more ...*index.Component) (*github.GitHub, *index.Index) {
 	t.Helper()
-	g := github.New(o)
+	g := github.New(hermetic(o))
 	comps := append([]*index.Component{g.Component}, more...)
 	text := "[instances.github]\ncomponent = \"github\"\nconfig = { " + config + " }\n"
 	wires := "\n[wires]\n\"github.second\" = \"built-in\"\n"

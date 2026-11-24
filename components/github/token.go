@@ -27,11 +27,14 @@ const secondaryWait = time.Minute
 // included, measured against the component's clock.
 const RequestWait = 30 * time.Second
 
-// rest is the token backend's REST client. It keeps each path's ETag and
-// body, so a read of an unchanged one answers 304 and costs no quota, and
-// one pace: after a rate limit, every read waits until it lifts.
+// rest is the REST client of the token and proxy backends. It keeps each
+// path's ETag and body, so a read of an unchanged one answers 304 and costs
+// no quota, and one pace: after a rate limit, every read waits until it
+// lifts. On the proxy it holds no token and sends no Authorization of its
+// own: the environment's proxy adds the credentials.
 type rest struct {
 	api, token string
+	via        string // the backend it reads for, as a snapshot's via names it
 	client     *http.Client
 	sleep      func(time.Duration)
 	clock      host.Clock
@@ -129,7 +132,7 @@ func (c *rest) page(path string) (any, bool, error) {
 		}
 		req.Header.Set("Accept", "application/vnd.github+json")
 		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-		req.Header.Set("Authorization", "Bearer "+c.token)
+		c.authorize(req)
 		if held {
 			req.Header.Set("If-None-Match", prev.etag)
 		}
@@ -226,4 +229,42 @@ func hasNext(link string) bool {
 		}
 	}
 	return false
+}
+
+// authorize sets the token's Authorization header; on the proxy, which holds
+// no token, it sets none, so the environment's proxy adds its credentials.
+func (c *rest) authorize(req *http.Request) {
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+}
+
+// probe answers why the proxy backend cannot read api, or "" where it can:
+// GET <api>/rate_limit, sent through the environment's HTTPS proxy with no
+// Authorization of kern's own, answers 200. Where the environment names no
+// proxy for api, nothing is sent. The request is bounded by RequestWait on
+// the component's clock.
+func (g *GitHub) probe(api string) string {
+	req, err := http.NewRequest(http.MethodGet, api+"/rate_limit", nil)
+	if err != nil {
+		return fmt.Sprintf("GET %s/rate_limit cannot be sent: %v", api, err)
+	}
+	if proxy, err := g.o.Proxy(req); err != nil || proxy == nil {
+		return fmt.Sprintf("the environment names no HTTPS proxy for %s", api)
+	}
+	ctx, cancel := host.Within(context.Background(), g.o.Clock, RequestWait)
+	defer cancel()
+	req = req.WithContext(ctx)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	resp, err := g.o.Client.Do(req)
+	if err != nil {
+		return fmt.Sprintf("GET %s/rate_limit through the proxy: %v", api, err)
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Sprintf("GET %s/rate_limit through the proxy answers %s, not 200", api, resp.Status)
+	}
+	return ""
 }

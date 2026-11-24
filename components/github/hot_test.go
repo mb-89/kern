@@ -35,7 +35,7 @@ var root = filepath.Join("..", "..")
 func module(api string, tok func() (string, error), owner, repo string, now func() time.Time) kerntest.Module {
 	return kerntest.Module{Component: github.Component.Component, File: "expect.toml",
 		Fresh: func() *index.Component {
-			return github.New(github.Options{Clock: nowClock(now), Token: tok, Cloud: notCloud}).Component
+			return github.New(github.Options{Proxy: noProxy, Clock: nowClock(now), Token: tok, Cloud: notCloud}).Component
 		},
 		Start: func(f *kerntest.Fake) error {
 			for k, v := range map[string]string{"backend": github.Token, "api": api, "refresh": "0s"} {
