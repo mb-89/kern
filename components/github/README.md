@@ -11,14 +11,26 @@ The config key `backend` chooses at start, and the output `backend` names the ch
 
 | backend | where | how a read is answered |
 |---|---|---|
-| `token` | a token is found: `GH_TOKEN`, else `GITHUB_TOKEN`, else `gh auth token` | GitHub's REST API, in process |
-| `relay` | none is found, or in a cloud session | the session's own GitHub tool, its answer handed back by the PostToolUse hook |
+| `token` | a token is found outside a cloud session: `GH_TOKEN`, else `GITHUB_TOKEN`, else `gh auth token` | GitHub's REST API, in process |
+| `proxy` | no token is, or in a cloud session, and `GET /rate_limit` through the environment's HTTPS proxy answers 200 without one | GitHub's REST API, in process, through the proxy, which adds the credentials |
+| `relay` | neither is | the session's own GitHub tool, its answer handed back by the PostToolUse hook |
 
-`auto`, the default, takes the relay in a Claude Code cloud session (`CLAUDE_CODE_REMOTE=true`),
-whose `GH_TOKEN` is the proxy's stand-in that code cannot use; elsewhere the token where one is
-found, else the relay. `token` without one refuses the start.
+`auto`, the default, takes them in that order. In a Claude Code cloud session
+(`CLAUDE_CODE_REMOTE=true`) it looks for no token, since the session's `GH_TOKEN` is the proxy's
+stand-in that code cannot use, and takes the proxy where REST answers through it (GraphQL is
+refused there, and the component reads none), else the relay. `token` without a token refuses the
+start; so does `proxy` where the probe does not answer 200, naming its answer.
 
-- **The token backend** keeps each path's ETag and answer, so a read of an unchanged one is
+- **The probe** is sent at start only where the environment names an HTTPS proxy for `api`
+  (`HTTPS_PROXY`, `Options.Proxy` in a test), with no Authorization of kern's own and bounded by
+  `RequestWait` on the clock; without a proxy nothing is sent, and the relay is taken.
+- **The proxy backend** is the token backend without a token: every read and write below runs in
+  process with its ETags, its refresh and its pacing, and sends no Authorization, so no token
+  reaches the session. Nothing enters `outbox`, the verb `step` is refused, and a `SessionStart`
+  is told that no GitHub tool call waits on the outbox. A GitHub tool answer the session gets on
+  its own still lands.
+
+- **The token backend**, and the proxy backend with it, keeps each path's ETag and answer, so a read of an unchanged one is
   answered `304` and costs no quota. A list read is paged, 100 items a page, and each page keeps
   its own ETag, so an unchanged page costs no quota either. Every `refresh` (2 minutes) it reads
   each snapshot and list it holds again, each page with its ETag. It keeps no timer: its input
@@ -76,7 +88,7 @@ watches for, the input keys an answer must carry equal, and how long to wait, up
   oldest numbered step waiting, then what waits.
 - A step whose call is given up leaves `outbox` at once, so the agent is never told a step that
   no one waits for (`docs/go-core.md` "A call given up").
-- Only the relay runs steps; with a token a command runs its GitHub steps itself.
+- Only the relay runs steps; on the token or the proxy a command runs its GitHub steps itself.
 
 ## Writes: filled templates only
 
@@ -105,7 +117,7 @@ through the MCP door, a script through a command, another component through the 
 - **Unbound.** The application's wiring binds the port to its template component's verb
   `accept`, `"github.template-accept" = "<instance>.accept"`. Left unbound, the component starts
   and every write is refused, naming that binding.
-- **The token** posts to REST (`POST /repos/<owner>/<repo>/issues`, `.../issues/<n>/comments`),
+- **The token and the proxy** post to REST (`POST /repos/<owner>/<repo>/issues`, `.../issues/<n>/comments`),
   waiting out the pace and bounded by `RequestWait` on the clock, as a read is. A rate limit
   refuses a write before GitHub takes it, so it is sent again, four times at most.
 - **The relay** runs the write as a [step](#the-verb-step-a-write-tool-through-the-relay) of the
@@ -126,7 +138,8 @@ template component's fill answered it, one JSON value; the answer names the issu
 
 On each `PostToolUse`, `UserPromptSubmit` and `SessionStart` the component tells the agent the
 tool calls `outbox` waits for, reads and steps, oldest first, each with its note, as the host's
-hook `additionalContext`. A PostToolUse that answered a step first waits up to `tell-wait`
+hook `additionalContext`. On the proxy backend, where nothing waits, it tells a `SessionStart` that
+no GitHub tool call waits on the outbox (`github.ProxyTell`), and the other events nothing. A PostToolUse that answered a step first waits up to `tell-wait`
 (`300ms`) for the next step, so the agent is told it in the same hook: a step asked after that
 answer, never one asked before it.
 
@@ -149,8 +162,8 @@ list also holds.
 
 A **snapshot** is `{"repo", "number", "read", "via", "data"}` and a **list** is
 `{"repo", "state", "labels", "read", "via", "data"}`: `read` is the time it was read, `via` the
-backend, `data` the answer as that backend read it (GitHub's REST JSON through the token, the
-tool's JSON through the relay — a list's `data` is every page's items in GitHub's order). A
+backend, `data` the answer as that backend read it (GitHub's REST JSON through the token or the
+proxy, the tool's JSON through the relay — a list's `data` is every page's items in GitHub's order). A
 snapshot stands at the key `<owner>.<repo>.<number>` and a list at `<owner>.<repo>.<state>`, then
 each label in order, all in lower case, in its family:
 
@@ -204,7 +217,12 @@ the home's issue 1.
 
 ## Tests
 
-`github_test.go` and `lists_test.go` hold both backends to fakes: the token backend to a fake REST
+`proxy_test.go` holds the proxy backend to a fake proxy that adds the credentials to REST and
+refuses GraphQL and a request with its own Authorization: auto takes it in a cloud session and
+without a token, a read runs in process with its ETag and writes no outbox entry, a list, a write
+and a rate limit run as on the token, and a proxy that refuses REST leaves the relay as before.
+Every other case starts in an environment without a proxy (`hermetic`), so none probes the
+container's own. `github_test.go` and `lists_test.go` hold the token and relay backends to fakes: the token backend to a fake REST
 server (per-page ETags, the refresh driven by a second's count the case writes, a check-runs read at the head, each kind of rate limit on a
 single read and on a later page, paged issue, pull-request and comment reads), the relay to
 PostToolUse payloads shaped as a cloud session's hook hands them (list_issues' cursor pages,
