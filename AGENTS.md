@@ -19,6 +19,8 @@ uv run --no-project --python ">=3.11" python <se>/scripts/work_tickets.py suite 
   -q` for a change under `python/`; the complete suite is `work_tickets.py suite`.
 - No test waits on the wall clock: a time limit under test is shortened or faked (README.md
   "Tests"), never waited out.
+- The suite runs with the network cut: each package with tests holds an `offline_test.go` that
+  imports `kern/offline` (README.md "Tests"), which `kerntest/offline_test.go` holds it to.
 - `gofmt -l $(git ls-files '*.go')` lists nothing: `check` fails on any file it lists.
 - `.github/workflows/check.yml` is the check `check` the ruleset requires (README.md "Tests").
 

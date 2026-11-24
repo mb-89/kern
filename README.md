@@ -37,6 +37,7 @@ named in the design's plan.
 | `release.toml` | kern's version and the one URL its release is published under ([Release](#release)) | |
 | `tools/release/` | builds the release: six archives and `SHA256SUMS` | |
 | `waiting/` | how a test waits without the wall clock: `waiting.Fails`, the failure case of a select on an event, and `waiting.Until`, a look at a state that gives no event, both bounded by `waiting.Bound` alone ([Tests](#tests)) | SE's `tests/waiting.py` |
+| `offline/` | the network cut of every test binary of kern: imported by a test file of each package with tests, it drops the tokens, points the proxy variables at a closed port and refuses each host name's lookup at init ([Tests](#tests)) | |
 | `forbid/` | the scan that holds every I/O module to its forbid list: the Go and Python code under `components/` that uses another I/O module's entry ([Forbid lists](#forbid-lists)) | |
 | `tools/expect/` | `pending`: lists the pending expectations per claimer ([Pending expectations](#pending-expectations)) | |
 | `template/` | the bare application every new application starts from ([The template](#the-template)) | |
@@ -568,6 +569,16 @@ name of package `time`. It runs in `go test ./...`, so the landing's suite, the 
 (which needs a passing suite recorded) and CI's `check` refuse a test that waits on the wall clock.
 SE's commit hook runs no command of a project's yet, so a commit is held to it only once SE's hook
 runs one.
+
+kern's suite runs with the network cut. Every package of kern with tests imports `kern/offline`
+in a test file, `offline_test.go`, and `kerntest/offline_test.go` refuses one that does not. At
+init its test binary drops `GH_TOKEN`, `GITHUB_TOKEN` and `CLAUDE_CODE_REMOTE`, points every proxy
+variable at `127.0.0.1:9`, where nothing listens, with loopback alone reached without it, turns
+`GOPROXY` off, and answers each host name outside the hosts file with a refusal. So a test that
+reaches past its fakes fails at once, in the binary and in every process it starts, and the fakes
+on loopback answer as before. `python/tests/conftest.py` cuts the Python SDK's tests the same way,
+refusing every lookup of an address that is no loopback one. A hot test's run (`KERN_HOT`) leaves
+the network whole ([Hot tests](#hot-tests)).
 
 `.github/workflows/check.yml` is the check `main`'s ruleset requires, `check`. Its job `check`
 gates the commits with SE's public check, holds a pull request to the work model's issue rule and
