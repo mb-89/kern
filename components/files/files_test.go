@@ -442,7 +442,7 @@ func TestTheRealWatcherHearsAHandEdit(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	c := files.New(files.Options{Root: root, Clock: host.Wall{}})
+	c := files.New(files.Options{Root: root, Clock: host.Wall{}, Watch: files.OpenWatcher})
 	w, err := index.ParseWiring([]byte(`
 [instances.files]
 component = "files"

@@ -10,9 +10,9 @@ import (
 )
 
 // box is an I/O component whose own command asks its own verb file through
-// its request port file, bound to that verb where the wiring binds it to nothing.
+// its request port file-item, bound to that verb where the wiring binds it to nothing.
 func box(served *[]string) *index.Component {
-	file := index.Request[string, int]("file", "Files an item through the box's own verb.").Self("file")
+	file := index.Request[string, int]("file-item", "Files an item through the box's own verb.").Self("file")
 	return index.Declare("box", "The box: files items.", index.IO(), file,
 		index.Verb("file", "Files an item.", func(_ context.Context, item string) (int, error) {
 			*served = append(*served, "box "+item)
@@ -62,11 +62,11 @@ func TestARequestPortBindsItsOwnVerbWhereTheWiringBindsNone(t *testing.T) {
 		}
 	}
 	if verb != "box.file" {
-		t.Fatalf("the catalog shows box.file bound to %q, and wants box.file, its own verb", verb)
+		t.Fatalf("the catalog shows box.file-item bound to %q, and wants box.file, its own verb", verb)
 	}
 
 	served = nil
-	w, err = index.ParseWiring([]byte("[instances.box]\ncomponent = \"box\"\n\n[instances.other]\ncomponent = \"other\"\n\n[wires]\n\"box.file\" = \"other.file\"\n"))
+	w, err = index.ParseWiring([]byte("[instances.box]\ncomponent = \"box\"\n\n[instances.other]\ncomponent = \"other\"\n\n[wires]\n\"box.file-item\" = \"other.file\"\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,11 +81,11 @@ func TestARequestPortBindsItsOwnVerbWhereTheWiringBindsNone(t *testing.T) {
 
 // Self names a verb its own component declares; one it lacks is refused.
 func TestASelfBindingNamesAVerbOfItsOwn(t *testing.T) {
-	file := index.Request[string, int]("file", "Files.").Self("post")
+	file := index.Request[string, int]("file-item", "Files.").Self("post")
 	c := index.Declare("box", "The box.", index.IO(), file,
 		index.Verb("file", "Files an item.", func(_ context.Context, item string) (int, error) { return 0, nil }))
 	w, _ := index.ParseWiring([]byte("[instances.box]\ncomponent = \"box\"\n"))
-	if _, err := index.Start(w, c); err == nil || !strings.Contains(err.Error(), "request port box.file names its own verb post, which component box does not declare") {
+	if _, err := index.Start(w, c); err == nil || !strings.Contains(err.Error(), "request port box.file-item names its own verb post, which component box does not declare") {
 		t.Fatalf("the index answers %v, and wants a self-binding to a verb the component lacks refused", err)
 	}
 }

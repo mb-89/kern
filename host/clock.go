@@ -22,6 +22,23 @@ type Wall struct{}
 func (Wall) Now() time.Time                         { return time.Now() }
 func (Wall) After(d time.Duration) <-chan time.Time { return time.After(d) }
 
+// Still is a clock no one moves: an I/O module's clock where none is given,
+// so a module built without one reads no system time and starts no timer.
+// Its time stands at At; a wait of no time is over at once, and a longer
+// one never ends. The core's process hands in Wall.
+type Still struct{ At time.Time }
+
+func (s Still) Now() time.Time { return s.At }
+
+func (s Still) After(d time.Duration) <-chan time.Time {
+	if d > 0 {
+		return nil // time stands: the wait never ends
+	}
+	c := make(chan time.Time, 1)
+	c <- s.At
+	return c
+}
+
 // Within is context.WithTimeout on clock: the context ends once clock passes
 // d, its cause naming the wait and wrapping context.DeadlineExceeded, or when
 // the parent ends or cancel is called.

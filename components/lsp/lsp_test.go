@@ -96,7 +96,7 @@ func serve(t *testing.T, root string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fc := files.New(files.Options{Root: root, Clock: host.Wall{}})
+	fc := files.New(files.Options{Root: root, Clock: host.Wall{}, Watch: files.OpenWatcher})
 	core, err := host.Serve(host.Options{Root: root, Wiring: w, Components: []*index.Component{fc.Component, lsp.Component}})
 	if err != nil {
 		t.Fatal(err)

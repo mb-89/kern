@@ -37,6 +37,7 @@ named in the design's plan.
 | `release.toml` | kern's version and the one URL its release is published under ([Release](#release)) | |
 | `tools/release/` | builds the release: six archives and `SHA256SUMS` | |
 | `waiting/` | how a test waits without the wall clock: `waiting.Fails`, the failure case of a select on an event, and `waiting.Until`, a look at a state that gives no event, both bounded by `waiting.Bound` alone ([Tests](#tests)) | SE's `tests/waiting.py` |
+| `offline/` | the network cut of every test binary of kern: imported by a test file of each package with tests, it drops the tokens, points the proxy variables at a closed port and refuses each host name's lookup at init ([Tests](#tests)) | |
 | `forbid/` | the scan that holds every I/O module to its forbid list: the Go and Python code under `components/` that uses another I/O module's entry ([Forbid lists](#forbid-lists)) | |
 | `tools/expect/` | `pending`: lists the pending expectations per claimer ([Pending expectations](#pending-expectations)) | |
 | `template/` | the bare application every new application starts from ([The template](#the-template)) | |
@@ -102,6 +103,12 @@ bare run with `cli.Bare`, and the help renders them all.
   a timer of its own, and the clock's forbid list refuses a component that reads the system time
   itself ([Forbid lists](#forbid-lists)). Every wait for an answer measures its limit
   against the host's clock (`host.Clock`), which a test replaces with a clock it moves itself.
+- **An I/O module's zero value does no I/O.** Each I/O module's options (`github.Options`,
+  `clock.Options`, `files.Options`, `session.Options`) reach nothing where a test leaves them
+  unset: no token, no proxy, no cloud session, no watcher, and a clock no one moves
+  (`host.Still`), so such a module reaches the outside only where its wiring and its options ask
+  for it. Each module's `Environment()` names the environment, and the binary's component is built
+  from it; the person blessed this on 24 Nov (kern's retro, finding 7).
 - **Guards.** An I/O component that declares `index.Guards` is asked after the event is heard:
   the first instance that refuses it answers the effect `deny` with its reason, and no bound
   command runs. The [files component](components/files/README.md) is kern's one guard
@@ -176,7 +183,10 @@ launcher, since its working directory need not be the checkout.
   leaves the record any call leaves. The door reaches no outside service itself.
   - An I/O component's own writing command asks its own verb the same way: a request port that
     names a verb of its component (`index.RequestPort.Self`) is bound to it where the wiring binds
-    the port to nothing.
+    the port to nothing. The port takes a name of its own, such as `file-issue` for the verb
+    `issue-create`: the catalog check refuses a component that declares a port (a request port, an
+    input or an output) and a verb of one name, naming both, since a wire to that name would bind
+    the port and never the verb.
   - The [GitHub component](components/github/README.md) serves `github_write`: its commands
     `github issue-create` and `github issue-comment`, through its verbs of those names. They take a
     filled template, never free text, which the application's template component accepts before
@@ -559,6 +569,16 @@ name of package `time`. It runs in `go test ./...`, so the landing's suite, the 
 (which needs a passing suite recorded) and CI's `check` refuse a test that waits on the wall clock.
 SE's commit hook runs no command of a project's yet, so a commit is held to it only once SE's hook
 runs one.
+
+kern's suite runs with the network cut. Every package of kern with tests imports `kern/offline`
+in a test file, `offline_test.go`, and `kerntest/offline_test.go` refuses one that does not. At
+init its test binary drops `GH_TOKEN`, `GITHUB_TOKEN` and `CLAUDE_CODE_REMOTE`, points every proxy
+variable at `127.0.0.1:9`, where nothing listens, with loopback alone reached without it, turns
+`GOPROXY` off, and answers each host name outside the hosts file with a refusal. So a test that
+reaches past its fakes fails at once, in the binary and in every process it starts, and the fakes
+on loopback answer as before. `python/tests/conftest.py` cuts the Python SDK's tests the same way,
+refusing every lookup of an address that is no loopback one. A hot test's run (`KERN_HOT`) leaves
+the network whole ([Hot tests](#hot-tests)).
 
 `.github/workflows/check.yml` is the check `main`'s ruleset requires, `check`. Its job `check`
 gates the commits with SE's public check, holds a pull request to the work model's issue rule and

@@ -27,7 +27,7 @@ var gate = index.Declare("gate", "Accepts what is filled.", index.IO(),
 // port. Loop asks its port again, bound back to loop, so it never ends.
 func door(wrote *[]string) *index.Component {
 	accept := index.Request[string, string]("accept", "Asks the gate whether it accepts the value.").Optional()
-	write := index.Request[string, string]("write", "Writes through the door's own verb.").Self("write")
+	write := index.Request[string, string]("write-self", "Writes through the door's own verb.").Self("write")
 	again := index.Request[string, string]("again", "Asks loop once more.").Optional()
 	return index.Declare("door", "Writes what the gate accepts.", index.IO(), accept, write, again,
 		index.Verb("write", "Writes what the gate accepts.", func(ctx context.Context, v string) (string, error) {

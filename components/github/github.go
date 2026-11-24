@@ -129,22 +129,25 @@ func Key(r Ref) string {
 // outboxKey is the key a read's step stands at in the outbox: <verb>.<key>.
 func outboxKey(k kind, r Ref) string { return k.verb + "." + Key(r) }
 
-// Options are what the component reaches the outside with; each has a
-// default, and a test replaces them.
+// Options are what the component reaches the outside with. Their zero value
+// reaches nothing: a clock no one moves, no token, no proxy and no cloud
+// session, so a component built from it chooses the relay and does no I/O,
+// and a test that leaves an option unset never reaches the environment.
+// Environment names the environment the binary's component reaches.
 type Options struct {
 	// Clock is the time reads are stamped with and every wait is measured
 	// against: the relay's waits, a step's wait and a tell's, and the pacing
-	// of a rate limit. The wall clock where none is given; a test hands in a
-	// clock it moves itself.
+	// of a rate limit. host.Still where none is given; the binary's is the
+	// wall clock, and a test hands in a clock it moves itself.
 	Clock host.Clock
-	// Token answers the token, or "" where none is found.
+	// Token answers the token, or "" where none is found: none where nil.
 	Token func() (string, error)
 	// Client is the REST client of the token and proxy backends: one that
 	// sends through Proxy where none is given.
 	Client *http.Client
-	// Proxy is the environment's HTTPS proxy for a request, nil where it
-	// names none: http.ProxyFromEnvironment where none is given. The proxy
-	// backend is probed only where it names one for the probe.
+	// Proxy is the HTTPS proxy for a request, nil where it names none: none
+	// where nil. The proxy backend is probed only where it names one for the
+	// probe.
 	Proxy func(*http.Request) (*url.URL, error)
 	// Sleep waits out a rate limit: a wait on Clock where none is given.
 	Sleep func(time.Duration)
@@ -152,10 +155,20 @@ type Options struct {
 	// never holds the clock: a goroutine of its own where none is given.
 	Go func(fn func())
 	// Cloud says whether the core runs in a cloud session, where no token
-	// reaches code and auto takes the proxy, else the relay:
-	// CLAUDE_CODE_REMOTE=true.
+	// reaches code and auto takes the proxy, else the relay: never where nil.
 	Cloud func() bool
 }
+
+// Environment is the options of the binary's component, the environment
+// named: the wall clock, the token FindToken finds, the environment's HTTPS
+// proxy (http.ProxyFromEnvironment) and a cloud session where
+// CLAUDE_CODE_REMOTE=true.
+func Environment() Options {
+	return Options{Clock: host.Wall{}, Token: FindToken, Proxy: http.ProxyFromEnvironment, Cloud: InCloud}
+}
+
+// InCloud says whether the core runs in a cloud session: CLAUDE_CODE_REMOTE=true.
+func InCloud() bool { return os.Getenv("CLAUDE_CODE_REMOTE") == "true" }
 
 // GitHub is the component and its state: one instance per core.
 type GitHub struct {
@@ -214,13 +227,13 @@ func (k kind) out() *index.FamilyPort[Snapshot] {
 // New makes the component with its outside reached through o.
 func New(o Options) *GitHub {
 	if o.Clock == nil {
-		o.Clock = host.Wall{}
+		o.Clock = host.Still{}
 	}
 	if o.Token == nil {
-		o.Token = FindToken
+		o.Token = func() (string, error) { return "", nil }
 	}
 	if o.Proxy == nil {
-		o.Proxy = http.ProxyFromEnvironment
+		o.Proxy = func(*http.Request) (*url.URL, error) { return nil, nil }
 	}
 	if o.Client == nil {
 		tr := http.DefaultTransport.(*http.Transport).Clone()
@@ -232,7 +245,7 @@ func New(o Options) *GitHub {
 		o.Sleep = func(d time.Duration) { <-clk.After(d) }
 	}
 	if o.Cloud == nil {
-		o.Cloud = func() bool { return os.Getenv("CLAUDE_CODE_REMOTE") == "true" }
+		o.Cloud = func() bool { return false }
 	}
 	if o.Go == nil {
 		o.Go = func(fn func()) { go fn() }
@@ -284,8 +297,9 @@ var Forbidden = index.Forbidden{
 	Imports:  []string{"github.com/google/go-github", "github.com/cli/go-gh"},
 }
 
-// Component is the component a binary carries; importing this package registers it.
-var Component = New(Options{})
+// Component is the component a binary carries, reaching the environment;
+// importing this package registers it.
+var Component = New(Environment())
 
 func init() { index.Register(Component.Component) }
 

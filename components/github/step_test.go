@@ -92,7 +92,7 @@ component = "stepper"
 
 func startedSteps(t *testing.T, o github.Options, config string) (*github.GitHub, *index.Index) {
 	t.Helper()
-	g := github.New(hermetic(o))
+	g := github.New(o)
 	ix, err := index.Start(stepWiring(t, config), g.Component, stepper)
 	if err != nil {
 		t.Fatal(err)

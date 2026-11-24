@@ -23,6 +23,15 @@ type Watcher interface {
 	Close() error
 }
 
+// deaf is the watcher where none is given: it watches nothing and hears
+// nothing.
+type deaf struct{}
+
+func (deaf) Add(string) error      { return nil }
+func (deaf) Events() <-chan string { return nil }
+func (deaf) Errors() <-chan error  { return nil }
+func (deaf) Close() error          { return nil }
+
 // ErrOverflow is the error a watcher hands when it lost events: the answer is
 // a hash reconcile of every managed folder.
 var ErrOverflow = errors.New("the watcher lost events")
