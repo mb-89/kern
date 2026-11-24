@@ -57,7 +57,9 @@ component = "runner"
 // as its step says it and a beat every CallBeat while the call runs, before
 // its one answer, which still holds every line: the caller waits as long as
 // the core says anything, not a fixed time. The case fires the call's beats
-// on the core's clock itself.
+// on the core's clock itself, one at a time: the next only once it heard the
+// last, and none once the held verb is let go, so no beat floods the caller's
+// subscription and drops a line or the answer as a slow consumer.
 func TestAStreamingCallHearsItsLinesAndBeatsBeforeItsAnswer(t *testing.T) {
 	t.Parallel()
 	w, comps, release := slowWiring(t)
@@ -79,11 +81,13 @@ func TestAStreamingCallHearsItsLinesAndBeatsBeforeItsAnswer(t *testing.T) {
 	}
 	var lines []string
 	beats := 0
+	fire := clk.waits // nil while a fired beat is not heard yet, and once the verb is let go
 	fails := waiting.Fails()
 	for answered := false; !answered; {
 		select {
-		case fire := <-clk.waits: // the case beats the call's clock
-			fire <- clk.Now()
+		case f := <-fire: // the case beats the call's clock
+			f <- clk.Now()
+			fire = nil
 		case m := <-heard:
 			if m.Subject == reply {
 				if beats < 2 || strings.Join(lines, "|") != "Phase: holding x|Phase: answered" {
@@ -107,8 +111,10 @@ func TestAStreamingCallHearsItsLinesAndBeatsBeforeItsAnswer(t *testing.T) {
 				lines = append(lines, p.Line)
 			} else if p.Beat {
 				beats++
+				fire = clk.waits
 				if beats == 2 {
 					close(release) // the held verb answers once the caller heard it beat twice
+					fire = nil
 				}
 			}
 		case <-fails:
