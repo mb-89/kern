@@ -68,7 +68,7 @@ func TestTheDoorFilesAnIssueFromAFilledTemplate(t *testing.T) {
 	t.Parallel()
 	f, srv := newFake(t)
 	f.created["/repos/alice/demo/issues"] = `{"number": 12, "html_url": "https://github.com/alice/demo/issues/12", "title": "door-files"}`
-	g := github.New(github.Options{Clock: &clock{now: nine}, Token: token(""), Cloud: notCloud})
+	g := github.New(github.Options{Proxy: noProxy, Clock: &clock{now: nine}, Token: token(""), Cloud: notCloud})
 	accept := &acceptor{}
 	w, err := index.ParseWiring([]byte(`
 [instances.github]

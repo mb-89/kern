@@ -224,7 +224,7 @@ func (g *GitHub) createIssue(ctx context.Context, a NewIssue) (Written, error) {
 	g.mu.Unlock()
 	w := Written{Repo: repoOf(a.Owner, a.Repo), Via: backend}
 	switch backend {
-	case Token:
+	case Token, Proxy:
 		payload := map[string]any{"title": title, "body": body}
 		if len(a.Labels) > 0 {
 			payload["labels"] = a.Labels
@@ -268,7 +268,7 @@ func (g *GitHub) comment(ctx context.Context, a NewComment) (Written, error) {
 	g.mu.Unlock()
 	w := Written{Repo: repoOf(a.Owner, a.Repo), Number: a.Number, Via: backend}
 	switch backend {
-	case Token:
+	case Token, Proxy:
 		data, err := rest.post(fmt.Sprintf("%s/issues/%d/comments", repoPath(a.Owner, a.Repo), a.Number), map[string]any{"body": body})
 		if err != nil {
 			return Written{}, fmt.Errorf("github issue-comment: %w", err)
@@ -340,7 +340,7 @@ func (c *rest) post(path string, payload any) (any, error) {
 		req.Header.Set("Accept", "application/vnd.github+json")
 		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+c.token)
+		c.authorize(req)
 		resp, err := c.client.Do(req)
 		if err != nil {
 			cancel()

@@ -640,8 +640,14 @@ func (g *GitHub) tell(_ string, event string, payload []byte) string {
 	delete(g.answered, string(payload))
 	stale, old := g.stale[string(payload)]
 	delete(g.stale, string(payload))
-	wait, asks, next := g.tellWait, g.asks, g.nextAsk
+	wait, asks, next, backend := g.tellWait, g.asks, g.nextAsk, g.backend
 	g.mu.Unlock()
+	if backend == Proxy { // nothing waits on the session: every read and write runs in process
+		if event == "SessionStart" {
+			return ProxyTell
+		}
+		return ""
+	}
 	if old { // an answer to an old step: its one line, then what waits
 		if waits := g.Outbox(); waits != "" {
 			return stale + "\n" + waits
@@ -656,6 +662,10 @@ func (g *GitHub) tell(_ string, event string, payload []byte) string {
 	}
 	return g.Outbox()
 }
+
+// ProxyTell is what a session start is told on the proxy backend: kern
+// reads and writes GitHub itself, so no GitHub tool call waits on its outbox.
+const ProxyTell = "kern's GitHub component runs on the backend proxy: it reads and writes GitHub over REST through the session's proxy itself, so no GitHub tool call waits on its outbox."
 
 // Outbox is the relay's waiting tool calls as the agent is told them, oldest
 // first, or "" where none waits.

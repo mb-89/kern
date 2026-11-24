@@ -85,7 +85,7 @@ component = "lister"
 
 func startedLists(t *testing.T, o github.Options, w index.Wiring) *index.Index {
 	t.Helper()
-	ix, err := index.Start(w, github.New(o).Component, lister)
+	ix, err := index.Start(w, github.New(hermetic(o)).Component, lister)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestTheTokenBackendListsEveryPageWithETags(t *testing.T) {
 	clk := &clock{now: nine}
 	b := newBeat()
 	ix, err := index.Start(beating(t, listWiringSrc(fmt.Sprintf(`api = %q`, api))),
-		github.New(github.Options{Clock: clk, Token: token(""), Cloud: notCloud, Go: func(fn func()) { fn() }}).Component, lister, b.component)
+		github.New(github.Options{Proxy: noProxy, Clock: clk, Token: token(""), Cloud: notCloud, Go: func(fn func()) { fn() }}).Component, lister, b.component)
 	if err != nil {
 		t.Fatal(err)
 	}
