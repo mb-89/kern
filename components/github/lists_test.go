@@ -85,7 +85,7 @@ component = "lister"
 
 func startedLists(t *testing.T, o github.Options, w index.Wiring) *index.Index {
 	t.Helper()
-	ix, err := index.Start(w, github.New(hermetic(o)).Component, lister)
+	ix, err := index.Start(w, github.New(o).Component, lister)
 	if err != nil {
 		t.Fatal(err)
 	}

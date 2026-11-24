@@ -22,7 +22,7 @@ refused there, and the component reads none), else the relay. `token` without a 
 start; so does `proxy` where the probe does not answer 200, naming its answer.
 
 - **The probe** is sent at start only where the environment names an HTTPS proxy for `api`
-  (`HTTPS_PROXY`, `Options.Proxy` in a test), with no Authorization of kern's own and bounded by
+  (`HTTPS_PROXY` in the binary, `Options.Proxy` in a test), with no Authorization of kern's own and bounded by
   `RequestWait` on the clock; without a proxy nothing is sent, and the relay is taken.
 - **The proxy backend** is the token backend without a token: every read and write below runs in
   process with its ETags, its refresh and its pacing, and sends no Authorization, so no token
@@ -66,6 +66,17 @@ start; so does `proxy` where the probe does not answer 200, naming its answer.
   - Each lands asked or not, and drops its outbox entry; a paged answer lands its name once its
     last page is heard, and a first page nobody asked with more behind it lands nothing, since it
     is no whole list. Other tools and methods pass unread; an error answer is logged.
+
+## Its options
+
+`github.Options` are what the component reaches the outside with, and their zero value reaches
+nothing: a clock no one moves (`host.Still`), no token, no proxy and no cloud session. A component
+built from it takes the relay at start and does no I/O, so a test that leaves an option unset
+never reaches the environment. `github.Environment()` names the environment, and the binary's
+component (`github.Component`) is built from it: the wall clock (`host.Wall`), the token
+`FindToken` finds (`GH_TOKEN`, else `GITHUB_TOKEN`, else `gh auth token`), the environment's HTTPS
+proxy (`http.ProxyFromEnvironment`) and a cloud session where `CLAUDE_CODE_REMOTE=true`
+(`InCloud`).
 
 ## The verb `step`: a write tool through the relay
 
@@ -221,8 +232,9 @@ the home's issue 1.
 refuses GraphQL and a request with its own Authorization: auto takes it in a cloud session and
 without a token, a read runs in process with its ETag and writes no outbox entry, a list, a write
 and a rate limit run as on the token, and a proxy that refuses REST leaves the relay as before.
-Every other case starts in an environment without a proxy (`hermetic`), so none probes the
-container's own. `github_test.go` and `lists_test.go` hold the token and relay backends to fakes: the token backend to a fake REST
+Every other case names no proxy, as the zero `Options` names none, so none probes the
+container's own; `zero_test.go` holds the zero `Options` to no network call, though the
+environment names a token, a proxy and a cloud session. `github_test.go` and `lists_test.go` hold the token and relay backends to fakes: the token backend to a fake REST
 server (per-page ETags, the refresh driven by a second's count the case writes, a check-runs read at the head, each kind of rate limit on a
 single read and on a later page, paged issue, pull-request and comment reads), the relay to
 PostToolUse payloads shaped as a cloud session's hook hands them (list_issues' cursor pages,

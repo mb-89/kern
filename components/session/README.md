@@ -62,7 +62,9 @@ Each event appends one line to `<folder>/<session>.jsonl`, its fields in this or
 `.se/.runtime/sessions`, relative to the core's working directory: components are handed no root,
 and the start runs the core in the checkout's root. A core run by hand with `kern serve` from
 another folder writes under that folder. A test passes its own folder and clock through
-`session.Options` to `session.New`.
+`session.Options` to `session.New`. The zero `session.Options` stamps each line with the time of
+a clock no one moves (`host.Still`), so a test that leaves it unset reads no system time;
+`session.Environment()` names the binary's, the wall clock (`host.Wall`).
 
 ## Failures
 

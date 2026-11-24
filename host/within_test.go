@@ -45,3 +45,33 @@ func TestWithinEndsWhenItsClockPassesTheWait(t *testing.T) {
 		t.Fatalf("a cancelled context ends with %v, and wants canceled", context.Cause(ctx))
 	}
 }
+
+// Still, an I/O module's clock where none is given, stands at its time: a
+// wait of no time is over at once, and a longer one never ends, so Within on
+// it ends only when cancelled.
+func TestAStillClockStandsAndEndsOnlyAWaitOfNoTime(t *testing.T) {
+	at := time.Date(2026, 11, 24, 9, 0, 0, 0, time.UTC)
+	c := host.Still{At: at}
+	if !c.Now().Equal(at) || !(host.Still{}).Now().IsZero() {
+		t.Fatalf("the still clock reads %v, and wants %v", c.Now(), at)
+	}
+	select {
+	case got := <-c.After(0):
+		if !got.Equal(at) {
+			t.Fatalf("a wait of no time ends at %v, and wants %v", got, at)
+		}
+	default:
+		t.Fatal("a wait of no time is not over at once")
+	}
+	if c.After(time.Hour) != nil {
+		t.Fatal("a wait of an hour can end on a still clock")
+	}
+	ctx, cancel := host.Within(context.Background(), c, time.Second)
+	select {
+	case <-ctx.Done():
+		t.Fatalf("Within on a still clock ended by itself: %v", context.Cause(ctx))
+	default:
+	}
+	cancel()
+	<-ctx.Done()
+}

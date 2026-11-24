@@ -75,4 +75,6 @@ refuses every other reader of the system time is kern#18's.
 `clock_test.go` drives the loop with a fake host clock that the case moves and fires: `time` on
 the step, each counter only when it moves, an overrun that skips the steps it missed, and the
 configurable granularity. The relay's own case holds it to every fifth count. A test passes its
-own clock through `clock.Options` to `clock.New`.
+own clock through `clock.Options` to `clock.New`. The zero `clock.Options` names no clock, and
+its instance runs no loop and writes no time, so a test that leaves it unset reads no system time;
+`clock.Environment()` names the binary's, the wall clock (`host.Wall`).

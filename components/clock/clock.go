@@ -24,12 +24,19 @@ const Name = "clock"
 // PerSecond is the built-in granularity: how often a second the time moves.
 const PerSecond = 10
 
-// Options are what the component reaches the outside with; each has a
-// default, and a test replaces it.
+// Options are what the component reaches the outside with. Their zero value
+// reaches nothing: without a clock no loop runs, and time stands at its
+// built-in values. Environment names the environment the binary's component
+// reaches.
 type Options struct {
-	// Clock is the time the loop reads and waits on: the wall clock where none is given.
+	// Clock is the time the loop reads and waits on: none where nil; the
+	// binary's is the wall clock, and a test hands in a clock it moves itself.
 	Clock host.Clock
 }
+
+// Environment is the options of the binary's component, the environment
+// named: the wall clock.
+func Environment() Options { return Options{Clock: host.Wall{}} }
 
 // Clock is the component.
 type Clock struct {
@@ -61,9 +68,6 @@ var Forbidden = index.Forbidden{Calls: []string{
 
 // New makes the component with its outside reached through o.
 func New(o Options) *Clock {
-	if o.Clock == nil {
-		o.Clock = host.Wall{}
-	}
 	c := &Clock{o: o}
 	c.Component = index.Declare(Name, "Writes time as names: the time since its start, and the seconds, minutes and hours counting up; components read the one they need instead of keeping a timer.",
 		index.IO(), index.Forbids(Forbidden), timeOut, secondOut, minuteOut, hourOut,
@@ -73,18 +77,21 @@ func New(o Options) *Clock {
 	return c
 }
 
-// Component is the component a binary carries; importing this package
-// registers it, and only a wiring's enabled instance runs it.
-var Component = New(Options{})
+// Component is the component a binary carries, on the wall clock; importing
+// this package registers it, and only a wiring's enabled instance runs it.
+var Component = New(Environment())
 
 func init() { index.Register(Component.Component) }
 
 // start reads the granularity and runs the instance's loop, which commits
-// until a commit fails.
+// until a commit fails; without a clock it runs none.
 func (c *Clock) start(_ string, read index.Reader, commit index.Commit) error {
 	n, ok := read(index.ConfigPrefix + "per-second").(int)
 	if !ok || n < 1 || n > 1000 {
 		return fmt.Errorf("config per-second: %v is not from 1 to 1000", read(index.ConfigPrefix+"per-second"))
+	}
+	if c.o.Clock == nil {
+		return nil // no clock: time stands
 	}
 	go c.loop(time.Second/time.Duration(n), commit)
 	return nil

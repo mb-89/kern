@@ -102,6 +102,12 @@ bare run with `cli.Bare`, and the help renders them all.
   a timer of its own, and the clock's forbid list refuses a component that reads the system time
   itself ([Forbid lists](#forbid-lists)). Every wait for an answer measures its limit
   against the host's clock (`host.Clock`), which a test replaces with a clock it moves itself.
+- **An I/O module's zero value does no I/O.** Each I/O module's options (`github.Options`,
+  `clock.Options`, `files.Options`, `session.Options`) reach nothing where a test leaves them
+  unset: no token, no proxy, no cloud session, no watcher, and a clock no one moves
+  (`host.Still`), so such a module reaches the outside only where its wiring and its options ask
+  for it. Each module's `Environment()` names the environment, and the binary's component is built
+  from it; the person blessed this on 24 Nov (kern's retro, finding 7).
 - **Guards.** An I/O component that declares `index.Guards` is asked after the event is heard:
   the first instance that refuses it answers the effect `deny` with its reason, and no bound
   command runs. The [files component](components/files/README.md) is kern's one guard

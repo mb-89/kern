@@ -18,15 +18,6 @@ import (
 // never probed in it.
 func noProxy(*http.Request) (*url.URL, error) { return nil, nil }
 
-// hermetic is o in an environment without an HTTPS proxy where o names none,
-// so no case probes the proxy of the container it runs in.
-func hermetic(o github.Options) github.Options {
-	if o.Proxy == nil {
-		o.Proxy = noProxy
-	}
-	return o
-}
-
 // api is the REST API the proxy cases read: plain HTTP, so the fake proxy is
 // handed each request whole, as a cloud session's proxy sees it once it ends
 // the TLS of api.github.com.

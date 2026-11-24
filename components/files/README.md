@@ -145,6 +145,11 @@ Reused from quackitect v4 (`src/engine/indexwatch.go`) and v5 (`src/modules/file
   later is added when its creation arrives. Each path it hands is read from the disk again: a
   changed file is written, a new folder is watched and walked, and a path gone is dropped with
   everything under it.
+- **Its options.** `files.Environment()` names the binary's watcher, the operating system's
+  (`files.OpenWatcher`), and its clock, the wall clock (`host.Wall`). The zero `files.Options`
+  reaches nothing beyond the folders a wiring names: its watcher hears nothing and its clock no one
+  moves (`host.Still`), so `cookie-wait` never passes, `watching` stays false while a folder is
+  managed, and reads read the disk. A test hands in a watcher it feeds, or `files.OpenWatcher`.
 - **The hash reconcile** hashes every file of every managed folder, writes what changed and drops
   what is gone. It runs at the start, after the watcher opens, so a change during it is heard
   after it, and whenever the watcher reports an overflow (`files.ErrOverflow`), since it lost

@@ -140,18 +140,27 @@ type Found struct {
 	Unsearched []string `json:"unsearched"`
 }
 
-// Options are what the component reaches the outside with; each has a
-// default, and a test replaces it.
+// Options are what the component reaches the outside with. Their zero value
+// reaches nothing beyond the folders a wiring names: a clock no one moves,
+// and a watcher that hears nothing, so the model is never proven watched and
+// reads read the disk. Environment names the environment the binary's
+// component reaches.
 type Options struct {
 	// Root is the folder the managed folders are named relative to: the
 	// core's working directory, which the start makes the checkout's root,
 	// where empty.
 	Root string
-	// Clock is what the cookie's wait measures against: the wall clock where none is given.
+	// Clock is what the cookie's wait measures against: host.Still where none
+	// is given; the binary's is the wall clock.
 	Clock host.Clock
-	// Watch opens the watcher: the operating system's (OpenWatcher) where none is given.
+	// Watch opens the watcher: one that hears nothing where none is given;
+	// the binary's is the operating system's (OpenWatcher).
 	Watch func() (Watcher, error)
 }
+
+// Environment is the options of the binary's component, the environment
+// named: the wall clock and the operating system's watcher.
+func Environment() Options { return Options{Clock: host.Wall{}, Watch: OpenWatcher} }
 
 // Files is the component and its model: one instance per core.
 type Files struct {
@@ -184,10 +193,10 @@ var (
 // New makes the component with its outside reached through o.
 func New(o Options) *Files {
 	if o.Clock == nil {
-		o.Clock = host.Wall{}
+		o.Clock = host.Still{}
 	}
 	if o.Watch == nil {
-		o.Watch = OpenWatcher
+		o.Watch = func() (Watcher, error) { return deaf{}, nil }
 	}
 	f := &Files{o: o, model: map[string]File{}}
 	parts := []index.Part{index.IO(), index.Forbids(index.Forbidden{Calls: Forbids, On: "folders"}), modelOut, watchingOut, foldersOut,
@@ -207,9 +216,10 @@ func New(o Options) *Files {
 	return f
 }
 
-// Component is the component a binary carries; importing this package
-// registers it, and only a wiring's enabled instance runs it.
-var Component = New(Options{})
+// Component is the component a binary carries, reaching the environment;
+// importing this package registers it, and only a wiring's enabled instance
+// runs it.
+var Component = New(Environment())
 
 func init() { index.Register(Component.Component) }
 

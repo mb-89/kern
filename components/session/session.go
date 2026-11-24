@@ -41,16 +41,23 @@ const (
 	Keep     = 20      // session files
 )
 
-// Options are what the component reaches the outside with; each has a
-// default, and a test replaces them.
+// Options are what the component reaches the outside with. Their zero value
+// reaches nothing beyond the folder an enabled instance writes: each line's
+// time is the still clock's (host.Still). Environment names the environment
+// the binary's component reaches.
 type Options struct {
 	// Dir is the folder the session files lie in; Dir (the constant) where empty.
 	Dir string
-	// Now is the clock each line's time comes from: the host's (host.Wall)
-	// where none is given, as the clock's forbid list leaves no component
-	// another reader of the system time (README.md "Forbid lists").
+	// Now is the clock each line's time comes from: host.Still's where none
+	// is given; the binary's is the host's wall clock (host.Wall), as the
+	// clock's forbid list leaves no component another reader of the system
+	// time (README.md "Forbid lists").
 	Now func() time.Time
 }
+
+// Environment is the options of the binary's component, the environment
+// named: the wall clock.
+func Environment() Options { return Options{Now: host.Wall{}.Now} }
 
 // Session is the component and its state: one per core.
 type Session struct {
@@ -70,7 +77,7 @@ func New(o Options) *Session {
 		o.Dir = Dir
 	}
 	if o.Now == nil {
-		o.Now = host.Wall{}.Now
+		o.Now = host.Still{}.Now
 	}
 	s := &Session{o: o, max: map[string]int64{}}
 	s.Component = index.Declare(Name, "Appends every event the host hands the core, one JSON line each, to a file per session under "+Dir+".",
@@ -83,9 +90,9 @@ func New(o Options) *Session {
 	return s
 }
 
-// Component is the component a binary carries; importing this package
-// registers it, and only a wiring's enabled instance runs it.
-var Component = New(Options{})
+// Component is the component a binary carries, on the wall clock; importing
+// this package registers it, and only a wiring's enabled instance runs it.
+var Component = New(Environment())
 
 func init() { index.Register(Component.Component) }
 

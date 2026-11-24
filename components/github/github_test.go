@@ -297,7 +297,7 @@ func (f *fakeGitHub) log() ([]string, []int) {
 // started starts an index with a component made of o and the reader.
 func started(t *testing.T, o github.Options, w index.Wiring) (*github.GitHub, *index.Index) {
 	t.Helper()
-	g := github.New(hermetic(o))
+	g := github.New(o)
 	ix, err := index.Start(w, g.Component, reader)
 	if err != nil {
 		t.Fatal(err)
