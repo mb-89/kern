@@ -50,6 +50,9 @@ host-hook	components/github/lists_test.go	mcp__github__
 host-hook	components/github/lists_test.go	tool_input
 host-hook	components/github/lists_test.go	tool_name
 host-hook	components/github/lists_test.go	tool_response
+host-hook	components/github/proxy_test.go	PostToolUse
+host-hook	components/github/proxy_test.go	SessionStart
+host-hook	components/github/proxy_test.go	mcp__github__
 host-hook	components/github/relay.go	PostToolUse
 host-hook	components/github/relay.go	SessionStart
 host-hook	components/github/relay.go	UserPromptSubmit
@@ -159,6 +162,13 @@ se-file	components/lsp/README.md	.se/templates
 se-file	components/lsp/lsp.go	.se/templates
 se-file	components/session/README.md	.se/wiring
 se-file	contract/declarations.json	.se/x
+se-file	docs/retro-2026-11-22-to-24.md	.se/ci
+se-file	docs/retro-2026-11-22-to-24.md	.se/metrics
+se-file	docs/retro-2026-11-22-to-24.md	scripts/generated.py
+se-file	docs/retro-2026-11-22-to-24.md	scripts/retro.py
+se-file	docs/retro-2026-11-22-to-24.md	scripts/se_start.py
+se-file	docs/retro-2026-11-22-to-24.md	scripts/work_tickets.py
+se-file	docs/retro-2026-11-22-to-24.md	se.toml
 se-file	forbid/forbid_test.go	.se/record
 se-file	generated.yaml	scripts/generated.py
 se-file	git/contract_test.go	scripts/adhoc.py
@@ -203,6 +213,7 @@ se-name	components/github/README.md	SE
 se-name	components/github/github.go	SE
 se-name	components/github/write_test.go	SE
 se-name	contract/kern_test.go	SE
+se-name	docs/retro-2026-11-22-to-24.md	SE
 se-name	filled/filled.go	SE
 se-name	generated.yaml	SE
 se-name	git/contract_test.go	SE
